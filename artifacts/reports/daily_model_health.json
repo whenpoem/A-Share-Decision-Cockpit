@@ -1,0 +1,20 @@
+{
+  "as_of_date": "2026-03-11",
+  "overall_confidence_flag": "high",
+  "recent_quality": {},
+  "training_validation_samples": 17059,
+  "symbols": {
+    "002202": {
+      "confidence_flag": "high",
+      "reasons": [],
+      "drift_score": 0.8599980777851833,
+      "feature_missing_ratio": 0.09523809523809523
+    },
+    "601727": {
+      "confidence_flag": "high",
+      "reasons": [],
+      "drift_score": 0.7552182427765145,
+      "feature_missing_ratio": 0.09523809523809523
+    }
+  }
+}

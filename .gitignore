@@ -1,4 +1,10 @@
-artifacts/
+artifacts/*
+!artifacts/reports/
+!artifacts/models/
+artifacts/reports/*
+!artifacts/reports/daily_*
+artifacts/models/*
+!artifacts/models/latest_metrics.json
 __pycache__/
 *.pyc
 *.pyo
