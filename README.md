@@ -12,11 +12,11 @@ This project focuses on two target stocks, `601727` and `002202`, while training
 
 ## Highlights
 
-- treats stock forecasting as a probability distribution problem instead of a single-point target-price guess
+- focuses on modeling future return distributions instead of a single-point target-price guess
 - separates `terminal distribution` and `touch probability` into two distinct but related prediction tasks
 - combines `GBM`, `state bootstrap`, and `LightGBM` into a calibrated ensemble
-- outputs machine-readable CSVs and human-readable Chinese research reports
-- includes walk-forward backtesting and calibration-focused metrics such as `log loss`, `RPS`, `Brier`, and `ECE`
+- outputs CSV, Markdown, and HTML artifacts for both programmatic consumption and manual review
+- emphasizes calibration with walk-forward backtesting and metrics such as `log loss`, `RPS`, `Brier`, and `ECE`
 
 ## Why This Project
 
