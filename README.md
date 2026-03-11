@@ -8,6 +8,14 @@ This project focuses on two target stocks, `601727` and `002202`, while training
 - touch probabilities for `+/-5%` to `+/-30%` price levels within the next 60 trading days
 - a daily confidence flag and a Chinese analyst-style research report after the close
 
+## Highlights
+
+- treats stock forecasting as a probability distribution problem instead of a single-point target-price guess
+- separates `terminal distribution` and `touch probability` into two distinct but related prediction tasks
+- combines `GBM`, `state bootstrap`, and `LightGBM` into a calibrated ensemble
+- outputs machine-readable CSVs and human-readable Chinese research reports
+- includes walk-forward backtesting and calibration-focused metrics such as `log loss`, `RPS`, `Brier`, and `ECE`
+
 ## Why This Project
 
 Most retail-facing stock prediction projects reduce the problem to a single label such as "up or down tomorrow". This repository treats the task as a probability distribution problem:
@@ -28,6 +36,28 @@ The pipeline is organized into six layers:
 4. `modeling`: GBM baseline, state bootstrap baseline, and global LightGBM models
 5. `calibration and constraints`: temperature scaling, isotonic calibration, and monotonic touch-probability constraints
 6. `backtest and reporting`: walk-forward evaluation, metrics, plots, and daily HTML/Markdown reports
+
+```mermaid
+flowchart LR
+    A["CLI / Scheduler"] --> B["Data Ingestion"]
+    B --> C["Local Cache"]
+    C --> D["Feature Engineering"]
+    C --> E["Label Generation"]
+    D --> F["Model Dataset"]
+    E --> F
+    F --> G["GBM Baseline"]
+    F --> H["State Bootstrap"]
+    F --> I["Global LightGBM"]
+    G --> J["Ensemble"]
+    H --> J
+    I --> J
+    J --> K["Calibration"]
+    K --> L["Monotonic Constraints"]
+    L --> M["Daily Predictions"]
+    F --> N["Walk-forward Backtest"]
+    M --> O["CSV / Markdown / HTML Reports"]
+    N --> O
+```
 
 ## Current Scope
 
@@ -81,6 +111,22 @@ python run_cli.py report-daily --config configs/default.json
 powershell -ExecutionPolicy Bypass -File scripts\run_live.ps1
 ```
 
+## Repository Layout
+
+```text
+src/astock_prob/
+  data/         data providers, caching, universe resolution
+  features/     feature engineering
+  labels/       forward return and touch-event labels
+  modeling/     baselines, ML models, calibration, constraints
+  backtest/     walk-forward evaluation
+  reporting/    Markdown/HTML/chart generation
+configs/        default and live-run configurations
+docs/           architecture notes
+scripts/        helper entrypoints
+tests/          unit and integration tests
+```
+
 ## Main Outputs
 
 Files are written to `artifacts/reports/`, including:
@@ -90,6 +136,13 @@ Files are written to `artifacts/reports/`, including:
 - `daily_model_health.json`
 - `daily_report.md`
 - `daily_report.html`
+
+Typical outputs include:
+
+- terminal return probability tables by stock and return bucket
+- target-touch probability ladders for `+/-5%` to `+/-30%`
+- confidence flags based on data completeness, drift, and recent model quality
+- daily HTML summaries for manual review after market close
 
 ## Metrics Used
 
@@ -101,6 +154,21 @@ The project evaluates forecast quality with probability-aware metrics:
 - `touch_ece_mean`
 
 These metrics are intended to measure both predictive quality and calibration quality.
+
+## Design Choices
+
+- `daily bars only`: phase one prioritizes robustness and reproducibility over intraday complexity
+- `cross-sectional training`: the model trains on a broader related-stock universe instead of only the target names
+- `calibration-first`: predicted probabilities are treated as outputs that must be evaluated and calibrated, not just ranked
+- `free-data aware`: the pipeline assumes API instability and uses local caching plus fallbacks
+
+## Roadmap
+
+- expand the live training universe closer to the configured `80-120+` names
+- rerun full walk-forward backtests on the larger universe and refresh health scoring
+- add sector-relative and market-regime features with stronger point-in-time validation
+- improve report pages with richer charts and side-by-side model component diagnostics
+- add optional CSV adapters for users who want to bypass unstable public APIs
 
 ## Notes
 
