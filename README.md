@@ -2,6 +2,8 @@
 
 A lightweight A-share probabilistic research system for daily-updated 60-day terminal return distributions and price-touch probabilities.
 
+中文摘要：这是一个面向 A 股个股研究的轻量级概率预测系统，重点输出未来 60 个交易日的期末收益分布与关键价位触达概率，并在收盘后生成中文研究报告。当前以 `601727` 和 `002202` 为目标股票，训练时使用更大的相关股票池进行横截面建模。完整中文说明见 [README.zh-CN.md](README.zh-CN.md)。
+
 This project focuses on two target stocks, `601727` and `002202`, while training on a broader cross-sectional universe of related A-share names. Instead of predicting a single target price, it estimates:
 
 - terminal return bucket probabilities over the next 60 trading days
