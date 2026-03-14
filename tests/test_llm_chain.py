@@ -85,6 +85,44 @@ class ObjectRejectedDecisionChain:
         ]
 
 
+class ObjectResearchChain:
+    def generate(self, system_prompt: str, user_prompt: str, schema):
+        return schema.model_validate(
+            {
+                "symbol": "300750",
+                "stance": "neutral",
+                "confidence": 0.42,
+                "summary": "Routine governance items with limited near-term impact.",
+                "evidence": [
+                    {"title": "Board resolution approved"},
+                    {"summary": "Capital structure update completed"},
+                ],
+                "event_quality": "mixed",
+                "drivers": [
+                    {"driver": "债券发行推进，改善资金安排", "strength": 0.7},
+                    {"driver": "公司治理动作延续", "strength": 0.6},
+                ],
+                "risks": [
+                    {"risk": "财务数据缺失", "strength": 0.7},
+                    {"risk": "短期催化不足", "strength": 0.5},
+                ],
+                "invalidators": [
+                    {"trigger": "新财报披露"},
+                    {"reason": "重大订单公告"},
+                ],
+                "holding_horizon_days": 7,
+                "suggested_action_bias": "avoid",
+                "provider_name": "deepseek",
+            }
+        ), [
+            LLMCallRecord(
+                provider_name="deepseek",
+                success=True,
+                detail="ok",
+            )
+        ]
+
+
 def test_extract_json_object_handles_markdown_wrapper() -> None:
     payload = "analysis first\n```json\n{\"a\":1,\"b\":\"ok\"}\n```\nextra"
     assert _extract_json_object(payload) == '{"a":1,"b":"ok"}'
@@ -126,6 +164,45 @@ def test_research_agent_fallback_keeps_failure_details(tmp_path) -> None:
     assert result.call_records
     assert "deepseek schema validation failed" in result.payload.risks[0]
     assert "deepseek" in result.payload.summary
+
+
+def test_research_agent_accepts_object_lists(tmp_path) -> None:
+    settings = make_settings(tmp_path)
+    agent = ResearchAgent(settings, ObjectResearchChain())
+    pack = SymbolEventPack(
+        as_of_date=datetime(2025, 12, 4),
+        symbol="300750",
+        prior=PriorSignal(
+            symbol="300750",
+            name="瀹佸痉鏃朵唬",
+            sector="鐢垫睜",
+            as_of_date=datetime(2025, 12, 4),
+            latest_close=250.0,
+            trend_score=0.5,
+            reversal_score=0.5,
+            breakout_score=0.5,
+            downside_risk_score=0.5,
+            liquidity_score=0.5,
+            event_sensitivity_score=0.5,
+            regime_alignment_score=0.5,
+            prior_long_score=0.5,
+            prior_avoid_score=0.5,
+            market_regime="neutral",
+        ),
+        financial_snapshot=None,
+        events=[],
+        position=None,
+        market_regime="neutral",
+        memory_context={},
+    )
+
+    result = agent.run(pack)
+
+    assert result.degrade_mode is False
+    assert result.payload.provider_name == "deepseek"
+    assert result.payload.drivers == ["债券发行推进，改善资金安排", "公司治理动作延续"]
+    assert result.payload.risks == ["财务数据缺失", "短期催化不足"]
+    assert result.payload.evidence == ["Board resolution approved", "Capital structure update completed"]
 
 
 def test_decision_agent_fallback_includes_failure_reason(tmp_path) -> None:

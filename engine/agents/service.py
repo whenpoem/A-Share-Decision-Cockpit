@@ -39,6 +39,74 @@ class AgentResult:
     call_records: list[dict[str, str]]
 
 
+def _coerce_text_list(
+    value: Any,
+    *,
+    keys: tuple[str, ...],
+) -> list[str]:
+    if value is None:
+        return []
+    if not isinstance(value, list):
+        value = [value]
+    normalized: list[str] = []
+    for item in value:
+        if isinstance(item, str):
+            text = item.strip()
+            if text:
+                normalized.append(text)
+            continue
+        if isinstance(item, (int, float)):
+            normalized.append(str(item))
+            continue
+        if isinstance(item, dict):
+            for key in keys:
+                field_value = item.get(key)
+                if isinstance(field_value, str) and field_value.strip():
+                    normalized.append(field_value.strip())
+                    break
+            else:
+                for field_value in item.values():
+                    if isinstance(field_value, str) and field_value.strip():
+                        normalized.append(field_value.strip())
+                        break
+    return normalized
+
+
+class PartialResearchCard(BaseModel):
+    symbol: str | None = None
+    stance: str | None = None
+    confidence: float | None = None
+    summary: str | None = None
+    evidence: list[str] = Field(default_factory=list)
+    event_quality: str | None = None
+    drivers: list[str] = Field(default_factory=list)
+    risks: list[str] = Field(default_factory=list)
+    invalidators: list[str] = Field(default_factory=list)
+    holding_horizon_days: int | None = None
+    suggested_action_bias: str | None = None
+    provider_name: str = "system"
+
+    @field_validator("evidence", mode="before")
+    @classmethod
+    def _coerce_evidence(cls, value: Any) -> list[str]:
+        return _coerce_text_list(value, keys=("evidence", "title", "event", "point", "summary"))
+
+    @field_validator("drivers", mode="before")
+    @classmethod
+    def _coerce_drivers(cls, value: Any) -> list[str]:
+        return _coerce_text_list(value, keys=("driver", "text", "summary", "reason", "point"))
+
+    @field_validator("risks", mode="before")
+    @classmethod
+    def _coerce_risks(cls, value: Any) -> list[str]:
+        return _coerce_text_list(value, keys=("risk", "text", "summary", "reason", "point"))
+
+    @field_validator("invalidators", mode="before")
+    @classmethod
+    def _coerce_invalidators(cls, value: Any) -> list[str]:
+        return _coerce_text_list(value, keys=("invalidator", "text", "summary", "reason", "trigger"))
+
+
 class PartialTradeIntentSet(BaseModel):
     as_of_date: datetime | None = None
     market_view: str | None = None
@@ -120,6 +188,45 @@ def _finalize_trade_intent_set(
     )
 
 
+def _finalize_research_card(
+    payload: PartialResearchCard,
+    *,
+    pack: SymbolEventPack,
+) -> ResearchCard:
+    stance = payload.stance if payload.stance in {"bullish", "bearish", "neutral"} else "neutral"
+    event_quality = (
+        payload.event_quality
+        if payload.event_quality in {"verified", "mixed", "weak"}
+        else "mixed"
+    )
+    confidence = _clamp_unit(payload.confidence if payload.confidence is not None else 0.25)
+    summary = payload.summary or "Structured research payload was partially repaired with runtime defaults."
+    evidence = payload.evidence or [event.title for event in pack.events[:2]]
+    drivers = payload.drivers or ["No strong directional driver was extracted."]
+    risks = payload.risks or ["Research evidence remains limited."]
+    invalidators = payload.invalidators or ["Re-run research if new filings or news arrive."]
+    holding_horizon_days = payload.holding_horizon_days or 5
+    suggested_action_bias = (
+        payload.suggested_action_bias
+        if payload.suggested_action_bias in {"open_long", "trim", "hold", "avoid"}
+        else ("hold" if pack.position else "avoid")
+    )
+    return ResearchCard(
+        symbol=payload.symbol or pack.symbol,
+        stance=stance,
+        confidence=confidence,
+        summary=summary,
+        evidence=evidence,
+        event_quality=event_quality,
+        drivers=drivers,
+        risks=risks,
+        invalidators=invalidators,
+        holding_horizon_days=holding_horizon_days,
+        suggested_action_bias=suggested_action_bias,
+        provider_name=payload.provider_name,
+    )
+
+
 class ResearchAgent:
     def __init__(self, settings: Settings, chain: ProviderChain) -> None:
         self.settings = settings
@@ -158,7 +265,8 @@ class ResearchAgent:
             }
         )
         try:
-            card, records = self.chain.generate(system_prompt, user_prompt, ResearchCard)
+            raw_card, records = self.chain.generate(system_prompt, user_prompt, PartialResearchCard)
+            card = _finalize_research_card(raw_card, pack=pack)
             card.provider_name = next(
                 (record.provider_name for record in records if record.success),
                 "system",
