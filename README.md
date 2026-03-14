@@ -40,7 +40,7 @@ Implemented:
 - live session control, approval flow, and broker status handling
 - mock live broker for local end-to-end testing
 - `QMT/Ptrade` adapter contract behind a feature gate
-- market data refresh with `akshare` and a sample fallback
+- market data refresh with `baostock`, `akshare` financial fallback, and a sample fallback
 - real A-share text ingestion:
   - Eastmoney stock news
   - CNINFO disclosure metadata
@@ -94,7 +94,8 @@ tests/              Backend tests
 
 The current setup uses:
 
-- `akshare` for A-share symbols and daily bars
+- `baostock` for A-share symbols and daily bars
+- `akshare` as the fallback for financial snapshots
 - `akshare.stock_news_em(symbol)` for Eastmoney stock news
 - `akshare.stock_zh_a_disclosure_report_cninfo(...)` for CNINFO disclosure metadata
 
@@ -129,7 +130,7 @@ Common variables:
 ```powershell
 $env:DEEPSEEK_API_KEY="your-key"
 $env:QWEN_API_KEY="your-key"
-$env:ASHARE_MARKET_PROVIDER="akshare"
+$env:ASHARE_MARKET_PROVIDER="baostock"
 $env:ASHARE_TEXT_PROVIDER="akshare"
 $env:ASHARE_STORAGE_ROOT="D:\bug\storage"
 ```

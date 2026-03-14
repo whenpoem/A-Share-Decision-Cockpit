@@ -111,6 +111,123 @@ class SampleMarketProvider(BaseMarketProvider):
         )
 
 
+def _fetch_financial_snapshot_via_akshare(symbol: str, ak_module: object | None) -> FinancialSnapshot:
+    if ak_module is None:
+        return SampleMarketProvider([symbol]).fetch_financial_snapshot(symbol)
+    candidates = [
+        ("stock_financial_abstract_ths", {"symbol": symbol, "indicator": "按报告期"}),
+        ("stock_financial_analysis_indicator", {"symbol": symbol}),
+    ]
+    for func_name, kwargs in candidates:
+        func = getattr(ak_module, func_name, None)
+        if func is None:
+            continue
+        try:
+            raw = func(**kwargs)
+        except Exception:
+            continue
+        if raw is None or raw.empty:
+            continue
+        row = raw.iloc[-1]
+        report_date = pd.to_datetime(row.iloc[0], errors="coerce")
+        return FinancialSnapshot(
+            symbol=symbol,
+            as_of_date=(report_date.to_pydatetime() if not pd.isna(report_date) else datetime.utcnow()),
+            revenue_yoy=float(pd.to_numeric(row.iloc[6], errors="coerce") or 0.0),
+            net_profit_yoy=float(pd.to_numeric(row.iloc[2], errors="coerce") or 0.0),
+            roe=float(pd.to_numeric(row.iloc[14], errors="coerce") or 0.0),
+            debt_ratio=float(pd.to_numeric(row.iloc[15], errors="coerce") or 0.0),
+        )
+    return SampleMarketProvider([symbol]).fetch_financial_snapshot(symbol)
+
+
+def _list_symbols_via_akshare(limit: int, ak_module: object | None) -> list[dict[str, str]]:
+    if ak_module is None:
+        return []
+    raw = ak_module.stock_zh_a_spot_em()
+    frame = raw.rename(
+        columns={
+            "代码": "symbol",
+            "名称": "name",
+            "总市值": "market_cap",
+            "所属行业": "sector",
+        }
+    )
+    frame["symbol"] = frame["symbol"].astype(str).str.zfill(6)
+    if "sector" not in frame.columns:
+        frame["sector"] = "未知"
+    frame = frame[~frame["name"].astype(str).str.contains("ST", case=False, na=False)]
+    frame = frame.sort_values("market_cap", ascending=False).head(limit)
+    return frame[["symbol", "name", "sector"]].to_dict(orient="records")
+
+
+def _to_baostock_code(symbol: str) -> str:
+    return f"sh.{symbol}" if symbol.startswith(("5", "6", "9")) else f"sz.{symbol}"
+
+
+def _from_baostock_code(code: str) -> str:
+    return code.split(".")[-1].zfill(6)
+
+
+class BaoStockMarketProvider(BaseMarketProvider):
+    def __init__(self) -> None:
+        import baostock as bs
+
+        self.bs = bs
+        login = self.bs.login()
+        if getattr(login, "error_code", "1") != "0":
+            raise RuntimeError(f"baostock login failed: {login.error_code} {login.error_msg}")
+        try:
+            import akshare as ak
+        except Exception:
+            ak = None
+        self.ak = ak
+
+    def _collect(self, query_result) -> pd.DataFrame:
+        if getattr(query_result, "error_code", "1") != "0":
+            raise RuntimeError(f"{query_result.error_code} {query_result.error_msg}")
+        rows: list[list[str]] = []
+        while query_result.next():
+            rows.append(query_result.get_row_data())
+        return pd.DataFrame(rows, columns=query_result.fields)
+
+    def list_symbols(self, limit: int) -> list[dict[str, str]]:
+        frame = self._collect(self.bs.query_all_stock(day=datetime.utcnow().date().isoformat()))
+        if frame.empty:
+            fallback = _list_symbols_via_akshare(limit, self.ak)
+            if fallback:
+                return fallback
+            return []
+        frame["symbol"] = frame["code"].astype(str).map(_from_baostock_code)
+        frame = frame[frame["symbol"].str.startswith(("0", "3", "6"))]
+        frame["name"] = frame.get("code_name", frame["symbol"]).astype(str)
+        frame["sector"] = "Unknown"
+        return frame[["symbol", "name", "sector"]].head(limit).to_dict(orient="records")
+
+    def fetch_price_history(self, symbol: str, start_date: str, end_date: str) -> pd.DataFrame:
+        query = self.bs.query_history_k_data_plus(
+            _to_baostock_code(symbol),
+            "date,open,high,low,close,volume,amount,turn",
+            start_date=start_date,
+            end_date=end_date,
+            frequency="d",
+            adjustflag="2",
+        )
+        frame = self._collect(query)
+        if frame.empty:
+            raise RuntimeError(f"no daily bars returned for symbol={symbol}")
+        frame = frame.rename(columns={"turn": "turnover"})
+        frame["date"] = pd.to_datetime(frame["date"])
+        frame["symbol"] = symbol
+        for column in ["open", "high", "low", "close", "volume", "amount", "turnover"]:
+            frame[column] = pd.to_numeric(frame[column], errors="coerce")
+        frame = frame.dropna(subset=["date", "open", "high", "low", "close"])
+        return frame[["date", "symbol", "open", "high", "low", "close", "volume", "amount", "turnover"]]
+
+    def fetch_financial_snapshot(self, symbol: str) -> FinancialSnapshot:
+        return _fetch_financial_snapshot_via_akshare(symbol, self.ak)
+
+
 class AkshareMarketProvider(BaseMarketProvider):
     def __init__(self) -> None:
         import akshare as ak
@@ -118,21 +235,7 @@ class AkshareMarketProvider(BaseMarketProvider):
         self.ak = ak
 
     def list_symbols(self, limit: int) -> list[dict[str, str]]:
-        raw = self.ak.stock_zh_a_spot_em()
-        frame = raw.rename(
-            columns={
-                "代码": "symbol",
-                "名称": "name",
-                "总市值": "market_cap",
-                "所属行业": "sector",
-            }
-        )
-        frame["symbol"] = frame["symbol"].astype(str).str.zfill(6)
-        if "sector" not in frame.columns:
-            frame["sector"] = "未知"
-        frame = frame[~frame["name"].astype(str).str.contains("ST", case=False, na=False)]
-        frame = frame.sort_values("market_cap", ascending=False).head(limit)
-        return frame[["symbol", "name", "sector"]].to_dict(orient="records")
+        return _list_symbols_via_akshare(limit, self.ak)
 
     def fetch_price_history(self, symbol: str, start_date: str, end_date: str) -> pd.DataFrame:
         raw = self.ak.stock_zh_a_hist(
@@ -159,31 +262,7 @@ class AkshareMarketProvider(BaseMarketProvider):
         return frame[["date", "symbol", "open", "high", "low", "close", "volume", "amount", "turnover"]]
 
     def fetch_financial_snapshot(self, symbol: str) -> FinancialSnapshot:
-        candidates = [
-            ("stock_financial_abstract_ths", {"symbol": symbol, "indicator": "按报告期"}),
-            ("stock_financial_analysis_indicator", {"symbol": symbol}),
-        ]
-        for func_name, kwargs in candidates:
-            func = getattr(self.ak, func_name, None)
-            if func is None:
-                continue
-            try:
-                raw = func(**kwargs)
-            except Exception:
-                continue
-            if raw is None or raw.empty:
-                continue
-            row = raw.iloc[-1]
-            report_date = pd.to_datetime(row.iloc[0], errors="coerce")
-            return FinancialSnapshot(
-                symbol=symbol,
-                as_of_date=(report_date.to_pydatetime() if not pd.isna(report_date) else datetime.utcnow()),
-                revenue_yoy=float(pd.to_numeric(row.iloc[6], errors="coerce") or 0.0),
-                net_profit_yoy=float(pd.to_numeric(row.iloc[2], errors="coerce") or 0.0),
-                roe=float(pd.to_numeric(row.iloc[14], errors="coerce") or 0.0),
-                debt_ratio=float(pd.to_numeric(row.iloc[15], errors="coerce") or 0.0),
-            )
-        return SampleMarketProvider([symbol]).fetch_financial_snapshot(symbol)
+        return _fetch_financial_snapshot_via_akshare(symbol, self.ak)
 
 
 class MarketService:
@@ -196,6 +275,8 @@ class MarketService:
         if self.settings.market_provider == "sample":
             return SampleMarketProvider(self.settings.default_watchlist)
         try:
+            if self.settings.market_provider == "baostock":
+                return BaoStockMarketProvider()
             return AkshareMarketProvider()
         except Exception:
             if not self.settings.fallback_to_sample_market:

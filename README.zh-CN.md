@@ -40,7 +40,7 @@
 - live session 控制、审批流、broker 状态显示
 - 本地 mock live broker 全链路
 - `QMT/Ptrade` 适配接口和 feature gate
-- 基于 `akshare` 的行情刷新，以及 sample fallback
+- 基于 `baostock` 的行情刷新、`akshare` 财务补充，以及 sample fallback
 - A 股真实文本接入：
   - 东方财富个股新闻
   - 巨潮资讯公告元数据
@@ -94,7 +94,8 @@ tests/              后端测试
 
 当前使用：
 
-- `akshare` A 股股票列表和日线行情
+- `baostock` A 股股票列表和日线行情
+- `akshare` 财务快照补充
 - `akshare.stock_news_em(symbol)` 东方财富新闻
 - `akshare.stock_zh_a_disclosure_report_cninfo(...)` 巨潮公告元数据
 
@@ -129,7 +130,7 @@ python -m pip install -r requirements.txt
 ```powershell
 $env:DEEPSEEK_API_KEY="your-key"
 $env:QWEN_API_KEY="your-key"
-$env:ASHARE_MARKET_PROVIDER="akshare"
+$env:ASHARE_MARKET_PROVIDER="baostock"
 $env:ASHARE_TEXT_PROVIDER="akshare"
 $env:ASHARE_STORAGE_ROOT="D:\bug\storage"
 ```

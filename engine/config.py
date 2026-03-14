@@ -49,7 +49,7 @@ class Settings:
     system_db_path: Path
     system_storage_root: Path
     current_mode: str = "paper"
-    market_provider: str = "akshare"
+    market_provider: str = "baostock"
     text_provider: str = "akshare"
     text_lookback_days: int = 30
     max_news_per_symbol: int = 6
@@ -155,7 +155,7 @@ class Settings:
                 terminal_user=os.getenv("ASHARE_QMT_USER", ""),
                 terminal_password=os.getenv("ASHARE_QMT_PASSWORD", ""),
             ),
-            market_provider=os.getenv("ASHARE_MARKET_PROVIDER", "akshare"),
+            market_provider=os.getenv("ASHARE_MARKET_PROVIDER", "baostock"),
             text_provider=os.getenv("ASHARE_TEXT_PROVIDER", "akshare"),
             text_lookback_days=int(os.getenv("ASHARE_TEXT_LOOKBACK_DAYS", "30")),
             max_news_per_symbol=int(os.getenv("ASHARE_MAX_NEWS_PER_SYMBOL", "6")),
