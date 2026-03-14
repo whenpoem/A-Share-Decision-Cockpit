@@ -22,6 +22,7 @@ The current `v1` is working in these areas:
 - real text ingestion for A-shares:
   - Eastmoney stock news via `stock_news_em`
   - CNINFO disclosure lists via `stock_zh_a_disclosure_report_cninfo`
+  - announcement PDF body extraction and local cache
 - `ResearchAgent` and `DecisionAgent` with structured JSON outputs
 - deterministic risk review before any order enters simulation
 - daily simulation and portfolio state persistence in SQLite
@@ -69,9 +70,16 @@ tests/              Backend tests
 - `akshare.stock_news_em(symbol)` for stock news
 - `akshare.stock_zh_a_disclosure_report_cninfo(...)` for disclosure metadata
 
-Important limitation:
+Announcement handling now downloads the disclosure PDF when available, extracts body text locally,
+and caches three artifacts:
 
-- announcement ingestion currently stores title, timestamp, and URL, not full filing body text
+- `storage/text/disclosures/<announcement_id>.json`
+- `storage/text/disclosures/pdf/<announcement_id>.pdf`
+- `storage/text/disclosures/text/<announcement_id>.txt`
+
+Current limitation:
+
+- very long filings are truncated before being passed into the event stream; full extracted text remains in the local cache
 
 ## Environment
 

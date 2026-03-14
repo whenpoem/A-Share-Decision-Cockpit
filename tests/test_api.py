@@ -14,9 +14,20 @@ def test_daily_pipeline_api_runs_in_degraded_mode(tmp_path) -> None:
     settings.storage_root = tmp_path
     settings.market_storage = tmp_path / "market"
     settings.text_storage = tmp_path / "text"
+    settings.disclosure_storage = settings.text_storage / "disclosures"
+    settings.disclosure_pdf_storage = settings.disclosure_storage / "pdf"
+    settings.disclosure_text_storage = settings.disclosure_storage / "text"
     settings.artifact_storage = tmp_path / "artifacts"
     settings.db_path = tmp_path / "state.db"
-    for path in (settings.storage_root, settings.market_storage, settings.text_storage, settings.artifact_storage):
+    for path in (
+        settings.storage_root,
+        settings.market_storage,
+        settings.text_storage,
+        settings.disclosure_storage,
+        settings.disclosure_pdf_storage,
+        settings.disclosure_text_storage,
+        settings.artifact_storage,
+    ):
         path.mkdir(parents=True, exist_ok=True)
     settings.market_provider = "sample"
     settings.text_provider = "derived"

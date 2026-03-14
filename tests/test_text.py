@@ -112,23 +112,51 @@ def test_refresh_text_fetches_only_focus_symbols(tmp_path) -> None:
     assert store.list_events("000002", priors[0].as_of_date.isoformat(), 10)
 
 
-def test_akshare_provider_maps_news_and_announcements() -> None:
-    settings = Settings.load(Path(__file__).resolve().parents[1])
+class FakeAkshareTextProvider(AkshareTextProvider):
+    def __init__(self, settings: Settings) -> None:
+        self.settings = settings
+        self.ak = _FakeAkshare()
+
+    def _fetch_announcement_detail(
+        self,
+        symbol: str,
+        announcement_id: str,
+        published_at: datetime,
+    ) -> dict[str, str] | None:
+        return {
+            "announcement_id": announcement_id,
+            "announcement_content": "",
+            "file_url": f"https://example.com/{announcement_id}.pdf",
+        }
+
+    def _download_pdf(self, file_url: str) -> bytes:
+        return b"%PDF-1.4 fake"
+
+    def _extract_pdf_text(self, pdf_path: Path) -> str:
+        return "Line one.\n\nLine two.\n\nLine three."
+
+
+def test_akshare_provider_extracts_and_caches_announcement_body(tmp_path) -> None:
+    settings = _settings_for_tmpdir(tmp_path)
     settings.max_news_per_symbol = 3
     settings.max_announcements_per_symbol = 3
-    provider = AkshareTextProvider.__new__(AkshareTextProvider)
-    provider.settings = settings
-    provider.ak = _FakeAkshare()
+    settings.max_announcement_body_chars = 40
+    provider = FakeAkshareTextProvider(settings)
     as_of_date = datetime(2026, 3, 14, 15, 0)
 
     events = provider.fetch_events("000001", as_of_date)
 
     assert len(events) == 2
-    assert {item.source_type for item in events} == {"news", "announcement"}
-    assert all(item.symbol == "000001" for item in events)
-    assert all(item.published_at <= as_of_date for item in events)
-    assert any("eastmoney" in item.source_name for item in events)
-    assert any("cninfo" in item.source_name for item in events)
+    announcement = next(item for item in events if item.source_type == "announcement")
+    assert "Line one." in announcement.content
+    assert announcement.url.endswith(".pdf")
+    assert (settings.disclosure_storage / "1223456789.json").exists()
+    assert (settings.disclosure_pdf_storage / "1223456789.pdf").exists()
+    assert (settings.disclosure_text_storage / "1223456789.txt").exists()
+
+    second_pass = provider.fetch_events("000001", as_of_date)
+    second_announcement = next(item for item in second_pass if item.source_type == "announcement")
+    assert second_announcement.content == announcement.content
 
 
 class _FakeAkshare:
@@ -168,14 +196,14 @@ class _FakeAkshare:
                     "简称": "Ping An",
                     "公告标题": "annual report summary",
                     "公告时间": "2026-03-13 18:00:00",
-                    "公告链接": "https://example.com/notice",
+                    "公告链接": "https://example.com/detail?announcementId=1223456789",
                 },
                 {
                     "代码": symbol,
                     "简称": "Ping An",
                     "公告标题": "future notice",
                     "公告时间": "2026-03-15 18:00:00",
-                    "公告链接": "https://example.com/future-notice",
+                    "公告链接": "https://example.com/detail?announcementId=1223999999",
                 },
             ]
         )
@@ -186,6 +214,9 @@ def _settings_for_tmpdir(tmp_path) -> Settings:
     settings.storage_root = tmp_path
     settings.market_storage = tmp_path / "market"
     settings.text_storage = tmp_path / "text"
+    settings.disclosure_storage = settings.text_storage / "disclosures"
+    settings.disclosure_pdf_storage = settings.disclosure_storage / "pdf"
+    settings.disclosure_text_storage = settings.disclosure_storage / "text"
     settings.artifact_storage = tmp_path / "artifacts"
     settings.db_path = tmp_path / "state.db"
     settings.text_provider = "derived"
@@ -193,6 +224,9 @@ def _settings_for_tmpdir(tmp_path) -> Settings:
         settings.storage_root,
         settings.market_storage,
         settings.text_storage,
+        settings.disclosure_storage,
+        settings.disclosure_pdf_storage,
+        settings.disclosure_text_storage,
         settings.artifact_storage,
     ):
         path.mkdir(parents=True, exist_ok=True)

@@ -20,6 +20,7 @@
 - 真实 A 股文本接入：
   - 东方财富个股新闻 `stock_news_em`
   - 巨潮资讯公告列表 `stock_zh_a_disclosure_report_cninfo`
+  - 公告 PDF 正文提取与本地缓存
 - `ResearchAgent` 和 `DecisionAgent`，输出结构化 JSON
 - 独立风控审批层，能够 `approved / clipped / delayed / rejected`
 - A 股日频模拟盘和 SQLite 状态持久化
@@ -67,9 +68,15 @@ tests/              后端测试
 - `akshare.stock_news_em(symbol)` 个股新闻
 - `akshare.stock_zh_a_disclosure_report_cninfo(...)` 公告元数据
 
+公告侧现在会在可用时下载 PDF、提取正文并缓存到本地：
+
+- `storage/text/disclosures/<announcement_id>.json`
+- `storage/text/disclosures/pdf/<announcement_id>.pdf`
+- `storage/text/disclosures/text/<announcement_id>.txt`
+
 现阶段的限制：
 
-- 公告侧目前保存的是“标题 + 时间 + 链接”，还不是全文正文
+- 很长的公告不会整篇直接塞进事件流；传给 agent 的是裁剪后的正文片段，完整提取文本保留在本地缓存
 
 ## 环境配置
 

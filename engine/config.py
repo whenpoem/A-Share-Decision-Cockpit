@@ -28,6 +28,9 @@ class Settings:
     storage_root: Path
     market_storage: Path
     text_storage: Path
+    disclosure_storage: Path
+    disclosure_pdf_storage: Path
+    disclosure_text_storage: Path
     artifact_storage: Path
     db_path: Path
     primary_provider: LLMProviderConfig
@@ -37,6 +40,7 @@ class Settings:
     text_lookback_days: int = 30
     max_news_per_symbol: int = 6
     max_announcements_per_symbol: int = 6
+    max_announcement_body_chars: int = 4000
     text_fallback_to_derived: bool = True
     market_universe_size: int = 60
     candidate_pool_size: int = 12
@@ -81,14 +85,28 @@ class Settings:
         storage_root = Path(os.getenv("ASHARE_STORAGE_ROOT", root / "storage")).resolve()
         market_storage = storage_root / "market"
         text_storage = storage_root / "text"
+        disclosure_storage = text_storage / "disclosures"
+        disclosure_pdf_storage = disclosure_storage / "pdf"
+        disclosure_text_storage = disclosure_storage / "text"
         artifact_storage = storage_root / "artifacts"
-        for path in (storage_root, market_storage, text_storage, artifact_storage):
+        for path in (
+            storage_root,
+            market_storage,
+            text_storage,
+            disclosure_storage,
+            disclosure_pdf_storage,
+            disclosure_text_storage,
+            artifact_storage,
+        ):
             path.mkdir(parents=True, exist_ok=True)
         return cls(
             project_root=root,
             storage_root=storage_root,
             market_storage=market_storage,
             text_storage=text_storage,
+            disclosure_storage=disclosure_storage,
+            disclosure_pdf_storage=disclosure_pdf_storage,
+            disclosure_text_storage=disclosure_text_storage,
             artifact_storage=artifact_storage,
             db_path=Path(os.getenv("ASHARE_DB_PATH", storage_root / "state.db")).resolve(),
             primary_provider=LLMProviderConfig(
@@ -116,6 +134,9 @@ class Settings:
             max_news_per_symbol=int(os.getenv("ASHARE_MAX_NEWS_PER_SYMBOL", "6")),
             max_announcements_per_symbol=int(
                 os.getenv("ASHARE_MAX_ANNOUNCEMENTS_PER_SYMBOL", "6")
+            ),
+            max_announcement_body_chars=int(
+                os.getenv("ASHARE_MAX_ANNOUNCEMENT_BODY_CHARS", "4000")
             ),
             text_fallback_to_derived=_bool_env("ASHARE_TEXT_FALLBACK_TO_DERIVED", True),
             market_universe_size=int(os.getenv("ASHARE_MARKET_UNIVERSE_SIZE", "60")),
