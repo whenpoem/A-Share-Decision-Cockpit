@@ -35,7 +35,6 @@ def make_settings(tmp_path: Path) -> Settings:
     settings.market_provider = "sample"
     settings.text_provider = "derived"
     settings.primary_provider.api_key = ""
-    settings.fallback_provider.api_key = ""
     return settings
 
 

@@ -14,6 +14,22 @@ def _json_block(payload: dict[str, Any]) -> str:
     return json.dumps(payload, ensure_ascii=False, indent=2, default=str)
 
 
+def _record_value(record: Any, field: str) -> Any:
+    if isinstance(record, dict):
+        return record.get(field)
+    return getattr(record, field, None)
+
+
+def _failure_details(call_records: list[Any]) -> list[str]:
+    return [
+        detail
+        for record in call_records
+        if not _record_value(record, "success")
+        for detail in [_record_value(record, "detail")]
+        if detail
+    ]
+
+
 @dataclass
 class AgentResult:
     payload: object
@@ -31,7 +47,8 @@ class ResearchAgent:
             "You are an A-share research analyst. "
             "Read price priors, text events, financials, position state, and memory context. "
             "Return only JSON that matches the ResearchCard schema. "
-            "If evidence is weak or conflicting, use stance=neutral and event_quality=weak or mixed."
+            "If evidence is weak or conflicting, use stance=neutral and event_quality=weak or mixed. "
+            "Output one JSON object only. Do not add markdown fences or prose outside JSON."
         )
         user_prompt = _json_block(
             {
@@ -48,8 +65,12 @@ class ResearchAgent:
                 "memory_context": pack.memory_context,
                 "output_rules": {
                     "require_json_only": True,
+                    "single_json_object_only": True,
+                    "no_markdown": True,
                     "confidence_range": [0.0, 1.0],
-                    "max_evidence_items": 6,
+                    "max_evidence_items": 4,
+                    "max_driver_items": 4,
+                    "max_risk_items": 4,
                 },
             }
         )
@@ -65,6 +86,7 @@ class ResearchAgent:
                 call_records=[record.__dict__ for record in records],
             )
         except LLMUnavailableError as exc:
+            details = _failure_details(getattr(exc, "call_records", []) or [])
             fallback_card = ResearchCard(
                 symbol=pack.symbol,
                 stance="neutral",
@@ -73,13 +95,17 @@ class ResearchAgent:
                 evidence=[event.title for event in pack.events[:2]],
                 event_quality="weak",
                 drivers=["No structured text research was produced, so new entries stay blocked."],
-                risks=["LLM unavailable"],
+                risks=details[:2] or ["LLM unavailable"],
                 invalidators=["Re-run research when an LLM provider is available."],
                 holding_horizon_days=5,
                 suggested_action_bias="hold" if pack.position else "avoid",
                 provider_name="system-fallback",
             )
-            return AgentResult(payload=fallback_card, degrade_mode=True, call_records=[])
+            return AgentResult(
+                payload=fallback_card,
+                degrade_mode=True,
+                call_records=[record.__dict__ for record in getattr(exc, "call_records", [])],
+            )
 
 
 class DecisionAgent:
@@ -101,7 +127,8 @@ class DecisionAgent:
             "Read research cards, existing positions, priors, and portfolio memory. "
             "Return only JSON that matches the TradeIntentSet schema. "
             "Every trade intent must include target_weight, stop_loss_pct, take_profit_pct, "
-            "time_stop_days, and evidence_count. Use higher cash when uncertainty is elevated."
+            "time_stop_days, and evidence_count. Use higher cash when uncertainty is elevated. "
+            "Output one JSON object only. Do not add markdown fences or prose outside JSON."
         )
         user_prompt = _json_block(
             {
@@ -115,6 +142,11 @@ class DecisionAgent:
                     "max_position_weight": self.settings.max_position_weight,
                     "max_gross_exposure": self.settings.max_gross_exposure,
                     "cash_bias_when_uncertain": True,
+                },
+                "output_rules": {
+                    "single_json_object_only": True,
+                    "no_markdown": True,
+                    "allow_empty_trade_intents_when_no_edge": True,
                 },
             }
         )
@@ -133,7 +165,8 @@ class DecisionAgent:
                 degrade_mode=False,
                 call_records=[record.__dict__ for record in records],
             )
-        except LLMUnavailableError:
+        except LLMUnavailableError as exc:
+            details = _failure_details(getattr(exc, "call_records", []) or [])
             fallback = TradeIntentSet(
                 as_of_date=as_of_date,
                 market_view=f"{market_view} / degraded",
@@ -158,10 +191,16 @@ class DecisionAgent:
                     for position in positions_payload
                 ],
                 rejected_symbols=[],
-                portfolio_risks=["LLM unavailable"],
+                portfolio_risks=details[:3] or ["LLM unavailable"],
                 decision_confidence=0.0,
-                rationale="Both LLM providers failed. Keep cash high and disable new entries.",
+                rationale=(
+                    "DeepSeek did not return an accepted TradeIntentSet. "
+                    + (" | ".join(details[:2]) if details else "Keep cash high and disable new entries.")
+                ),
                 provider_name="system-fallback",
             )
-            return AgentResult(payload=fallback, degrade_mode=True, call_records=[])
-
+            return AgentResult(
+                payload=fallback,
+                degrade_mode=True,
+                call_records=[record.__dict__ for record in getattr(exc, "call_records", [])],
+            )

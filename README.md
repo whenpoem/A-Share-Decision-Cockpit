@@ -15,7 +15,6 @@ The system combines structured market priors, real text ingestion, LLM research 
 - `FastAPI` backend control plane
 - `React + Vite` cockpit frontend
 - `DeepSeek` as the primary LLM provider
-- `Qwen` as the fallback LLM provider
 - A deterministic risk shell around all trade intents
 - A-share trading rules in simulation:
   - `T+1`
@@ -129,7 +128,6 @@ Common variables:
 
 ```powershell
 $env:DEEPSEEK_API_KEY="your-key"
-$env:QWEN_API_KEY="your-key"
 $env:ASHARE_MARKET_PROVIDER="baostock"
 $env:ASHARE_TEXT_PROVIDER="akshare"
 $env:ASHARE_STORAGE_ROOT="D:\bug\storage"
@@ -146,14 +144,13 @@ $env:ASHARE_LIVE_ACCOUNT_ID="demo-account"
 Useful options:
 
 - `DEEPSEEK_MODEL`
-- `QWEN_MODEL`
 - `ASHARE_DEFAULT_WATCHLIST`
 - `ASHARE_BLACKLIST_SYMBOLS`
 - `ASHARE_QMT_TERMINAL_PATH`
 - `ASHARE_QMT_USER`
 - `ASHARE_QMT_PASSWORD`
 
-If both LLM providers are unavailable, the system falls back to risk-only behavior and blocks new entries.
+If DeepSeek is unavailable or returns unusable structured output, the system falls back to risk-only behavior and blocks new entries.
 
 ## Running
 

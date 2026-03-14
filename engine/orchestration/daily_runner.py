@@ -8,7 +8,7 @@ from uuid import uuid4
 
 import pandas as pd
 
-from engine.agents.providers import DeepSeekProvider, ProviderChain, QwenProvider
+from engine.agents.providers import DeepSeekProvider, ProviderChain
 from engine.agents.service import DecisionAgent, ResearchAgent
 from engine.config import Settings
 from engine.execution.broker import build_broker_adapter
@@ -92,7 +92,6 @@ class DailyRunner:
         store = StateStore(mode_settings.db_path)
         provider_chain = ProviderChain(
             DeepSeekProvider(mode_settings.primary_provider),
-            QwenProvider(mode_settings.fallback_provider),
         )
         runtime = ModeRuntime(
             mode=mode,

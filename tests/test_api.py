@@ -32,7 +32,6 @@ def test_daily_pipeline_api_runs_in_degraded_mode(tmp_path) -> None:
     settings.market_provider = "sample"
     settings.text_provider = "derived"
     settings.primary_provider.api_key = ""
-    settings.fallback_provider.api_key = ""
     server_main.runner = DailyRunner(settings)
     client = TestClient(server_main.app)
 

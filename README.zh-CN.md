@@ -15,7 +15,6 @@
 - `FastAPI` 后端控制面
 - `React + Vite` 前端控制台
 - `DeepSeek` 主模型
-- `Qwen` 回退模型
 - LLM 交易意图之外的确定性风控壳
 - A 股日频规则：
   - `T+1`
@@ -129,7 +128,6 @@ python -m pip install -r requirements.txt
 
 ```powershell
 $env:DEEPSEEK_API_KEY="your-key"
-$env:QWEN_API_KEY="your-key"
 $env:ASHARE_MARKET_PROVIDER="baostock"
 $env:ASHARE_TEXT_PROVIDER="akshare"
 $env:ASHARE_STORAGE_ROOT="D:\bug\storage"
@@ -146,14 +144,13 @@ $env:ASHARE_LIVE_ACCOUNT_ID="demo-account"
 常用可选项：
 
 - `DEEPSEEK_MODEL`
-- `QWEN_MODEL`
 - `ASHARE_DEFAULT_WATCHLIST`
 - `ASHARE_BLACKLIST_SYMBOLS`
 - `ASHARE_QMT_TERMINAL_PATH`
 - `ASHARE_QMT_USER`
 - `ASHARE_QMT_PASSWORD`
 
-如果两个 LLM 都不可用，系统会降级到 risk-only 行为，并阻止新开仓。
+如果 DeepSeek 不可用，或者返回的结构化结果不可用，系统会降级到 risk-only 行为，并阻止新开仓。
 
 ## 启动方式
 

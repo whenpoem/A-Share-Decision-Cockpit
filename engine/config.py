@@ -44,7 +44,6 @@ class Settings:
     artifact_storage: Path
     db_path: Path
     primary_provider: LLMProviderConfig
-    fallback_provider: LLMProviderConfig
     live_broker: LiveBrokerConfig
     system_db_path: Path
     system_storage_root: Path
@@ -52,14 +51,14 @@ class Settings:
     market_provider: str = "baostock"
     text_provider: str = "akshare"
     text_lookback_days: int = 30
-    max_news_per_symbol: int = 6
-    max_announcements_per_symbol: int = 6
-    max_announcement_body_chars: int = 4000
+    max_news_per_symbol: int = 4
+    max_announcements_per_symbol: int = 4
+    max_announcement_body_chars: int = 1800
     text_fallback_to_derived: bool = True
     market_universe_size: int = 60
     candidate_pool_size: int = 12
     avoid_pool_size: int = 6
-    max_events_per_symbol: int = 8
+    max_events_per_symbol: int = 5
     max_position_weight: float = 0.10
     max_sector_weight: float = 0.25
     max_gross_exposure: float = 0.80
@@ -136,17 +135,6 @@ class Settings:
                 temperature=float(os.getenv("DEEPSEEK_TEMPERATURE", "0.1")),
                 max_tokens=int(os.getenv("DEEPSEEK_MAX_TOKENS", "1200")),
             ),
-            fallback_provider=LLMProviderConfig(
-                api_base=os.getenv(
-                    "QWEN_API_BASE",
-                    "https://dashscope.aliyuncs.com/compatible-mode/v1",
-                ),
-                api_key=os.getenv("QWEN_API_KEY", ""),
-                model_name=os.getenv("QWEN_MODEL", "qwen-plus"),
-                timeout_seconds=float(os.getenv("QWEN_TIMEOUT_SECONDS", "25")),
-                temperature=float(os.getenv("QWEN_TEMPERATURE", "0.1")),
-                max_tokens=int(os.getenv("QWEN_MAX_TOKENS", "1200")),
-            ),
             live_broker=LiveBrokerConfig(
                 provider=os.getenv("ASHARE_LIVE_BROKER", "qmt_ready"),
                 enabled=_bool_env("ASHARE_LIVE_ENABLED", False),
@@ -158,18 +146,18 @@ class Settings:
             market_provider=os.getenv("ASHARE_MARKET_PROVIDER", "baostock"),
             text_provider=os.getenv("ASHARE_TEXT_PROVIDER", "akshare"),
             text_lookback_days=int(os.getenv("ASHARE_TEXT_LOOKBACK_DAYS", "30")),
-            max_news_per_symbol=int(os.getenv("ASHARE_MAX_NEWS_PER_SYMBOL", "6")),
+            max_news_per_symbol=int(os.getenv("ASHARE_MAX_NEWS_PER_SYMBOL", "4")),
             max_announcements_per_symbol=int(
-                os.getenv("ASHARE_MAX_ANNOUNCEMENTS_PER_SYMBOL", "6")
+                os.getenv("ASHARE_MAX_ANNOUNCEMENTS_PER_SYMBOL", "4")
             ),
             max_announcement_body_chars=int(
-                os.getenv("ASHARE_MAX_ANNOUNCEMENT_BODY_CHARS", "4000")
+                os.getenv("ASHARE_MAX_ANNOUNCEMENT_BODY_CHARS", "1800")
             ),
             text_fallback_to_derived=_bool_env("ASHARE_TEXT_FALLBACK_TO_DERIVED", True),
             market_universe_size=int(os.getenv("ASHARE_MARKET_UNIVERSE_SIZE", "60")),
             candidate_pool_size=int(os.getenv("ASHARE_CANDIDATE_POOL_SIZE", "12")),
             avoid_pool_size=int(os.getenv("ASHARE_AVOID_POOL_SIZE", "6")),
-            max_events_per_symbol=int(os.getenv("ASHARE_MAX_EVENTS_PER_SYMBOL", "8")),
+            max_events_per_symbol=int(os.getenv("ASHARE_MAX_EVENTS_PER_SYMBOL", "5")),
             max_position_weight=float(os.getenv("ASHARE_MAX_POSITION_WEIGHT", "0.10")),
             max_sector_weight=float(os.getenv("ASHARE_MAX_SECTOR_WEIGHT", "0.25")),
             max_gross_exposure=float(os.getenv("ASHARE_MAX_GROSS_EXPOSURE", "0.80")),
