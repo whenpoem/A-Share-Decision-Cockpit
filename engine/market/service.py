@@ -202,6 +202,37 @@ class MarketService:
                 raise
             return SampleMarketProvider(self.settings.default_watchlist)
 
+    def _watchlist_symbols(self, watchlist: list[str]) -> list[dict[str, str]]:
+        normalized = sorted({symbol.zfill(6) for symbol in watchlist if symbol.strip()})
+        cached_rows = self.store.load_symbols(normalized)
+        cached_by_symbol = {row["symbol"]: row for row in cached_rows}
+        return [
+            cached_by_symbol.get(
+                symbol,
+                {"symbol": symbol, "name": symbol, "sector": "Unknown"},
+            )
+            for symbol in normalized
+        ]
+
+    def _symbol_universe(
+        self,
+        *,
+        end_value: str,
+        watchlist: Optional[list[str]],
+    ) -> list[dict[str, str]]:
+        provider_name = type(self.provider).__name__
+        if watchlist:
+            return self._watchlist_symbols(watchlist)
+        cached_symbols = self.store.list_symbols(self.settings.market_universe_size)
+        if cached_symbols:
+            return cached_symbols
+        try:
+            return self.provider.list_symbols(self.settings.market_universe_size)
+        except Exception as exc:
+            raise RuntimeError(
+                f"[market:{provider_name}] list_symbols failed for end_date={end_value}: {exc}"
+            ) from exc
+
     def refresh_market(
         self,
         start_date: str = "2023-01-01",
@@ -210,18 +241,7 @@ class MarketService:
     ) -> MarketSnapshot:
         end_value = end_date or datetime.utcnow().date().isoformat()
         provider_name = type(self.provider).__name__
-        try:
-            symbols = self.provider.list_symbols(self.settings.market_universe_size)
-        except Exception as exc:
-            raise RuntimeError(
-                f"[market:{provider_name}] list_symbols failed for end_date={end_value}: {exc}"
-            ) from exc
-        if watchlist:
-            normalized = {symbol.zfill(6) for symbol in watchlist}
-            symbols = [item for item in symbols if item["symbol"] in normalized]
-            existing = {item["symbol"] for item in symbols}
-            for symbol in sorted(normalized - existing):
-                symbols.append({"symbol": symbol, "name": symbol, "sector": "Unknown"})
+        symbols = self._symbol_universe(end_value=end_value, watchlist=watchlist)
         bars: dict[str, pd.DataFrame] = {}
         financials: dict[str, FinancialSnapshot] = {}
         for meta in symbols:

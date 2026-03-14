@@ -279,6 +279,44 @@ class StateStore:
             (symbol, name, sector, _utcnow()),
         )
 
+    def list_symbols(self, limit: int | None = None) -> list[dict[str, Any]]:
+        if limit is None:
+            rows = self.fetch_all(
+                """
+                SELECT symbol, name, sector
+                FROM symbols
+                WHERE is_active = 1
+                ORDER BY updated_at DESC, symbol
+                """
+            )
+        else:
+            rows = self.fetch_all(
+                """
+                SELECT symbol, name, sector
+                FROM symbols
+                WHERE is_active = 1
+                ORDER BY updated_at DESC, symbol
+                LIMIT ?
+                """,
+                (limit,),
+            )
+        return [dict(row) for row in rows]
+
+    def load_symbols(self, symbols: list[str]) -> list[dict[str, Any]]:
+        if not symbols:
+            return []
+        placeholders = ",".join("?" for _ in symbols)
+        rows = self.fetch_all(
+            f"""
+            SELECT symbol, name, sector
+            FROM symbols
+            WHERE is_active = 1 AND symbol IN ({placeholders})
+            """,
+            symbols,
+        )
+        by_symbol = {row["symbol"]: dict(row) for row in rows}
+        return [by_symbol[symbol] for symbol in symbols if symbol in by_symbol]
+
     def replace_text_events(self, rows: list[dict[str, Any]]) -> None:
         with self._lock, self.connection() as conn:
             conn.execute("DELETE FROM text_events")
