@@ -1,0 +1,273 @@
+:root {
+  color-scheme: light;
+  --bg: #f4efe6;
+  --paper: #fffaf2;
+  --ink: #1f1b16;
+  --muted: #6f6255;
+  --accent: #c45b28;
+  --accent-soft: #efc4aa;
+  --teal: #14686c;
+  --line: rgba(31, 27, 22, 0.12);
+  --shadow: 0 18px 48px rgba(73, 49, 18, 0.08);
+  font-family: "Aptos", "Segoe UI Variable", "Trebuchet MS", sans-serif;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  background:
+    radial-gradient(circle at top left, rgba(196, 91, 40, 0.12), transparent 30%),
+    linear-gradient(180deg, #f7f2ea 0%, #efe4d2 100%);
+  color: var(--ink);
+}
+
+.app-shell {
+  display: grid;
+  grid-template-columns: 320px 1fr;
+  min-height: 100vh;
+}
+
+.sidebar {
+  padding: 28px 22px;
+  border-right: 1px solid var(--line);
+  background: rgba(255, 250, 242, 0.82);
+  backdrop-filter: blur(10px);
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+}
+
+.eyebrow {
+  margin: 0 0 8px;
+  color: var(--accent);
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+  font-size: 0.75rem;
+  font-weight: 700;
+}
+
+.lede {
+  color: var(--muted);
+  line-height: 1.6;
+}
+
+.sidebar-card,
+.panel,
+.hero-card {
+  background: var(--paper);
+  border: 1px solid var(--line);
+  border-radius: 22px;
+  box-shadow: var(--shadow);
+}
+
+.sidebar-card {
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+button {
+  border: none;
+  border-radius: 14px;
+  padding: 12px 16px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+button.primary {
+  background: linear-gradient(135deg, var(--accent), #d78d52);
+  color: white;
+}
+
+button.secondary {
+  background: #ece2d3;
+  color: var(--ink);
+}
+
+.lamp {
+  width: 14px;
+  height: 14px;
+  border-radius: 999px;
+  display: inline-block;
+  margin-right: 10px;
+}
+
+.lamp-green {
+  background: #1b9f74;
+}
+
+.lamp-red {
+  background: #cb3f3f;
+}
+
+.lamp-amber {
+  background: #c88a22;
+}
+
+.main-grid {
+  padding: 28px;
+  display: grid;
+  gap: 18px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.hero-card {
+  grid-column: 1 / -1;
+  padding: 24px;
+  display: flex;
+  justify-content: space-between;
+  gap: 24px;
+}
+
+.hero-stats {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(120px, 1fr));
+  gap: 14px;
+}
+
+.hero-stats div {
+  padding: 14px;
+  border-radius: 16px;
+  background: #f1e6d8;
+}
+
+.hero-stats span,
+.panel-head span,
+.subpanel-note,
+.table-head,
+.intent-row span:last-child {
+  color: var(--muted);
+}
+
+.panel {
+  padding: 20px;
+}
+
+.panel-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 16px;
+}
+
+.signal-list,
+.equity-list {
+  display: grid;
+  gap: 12px;
+}
+
+.signal-card {
+  padding: 14px;
+  border-radius: 16px;
+  border: 1px solid var(--line);
+  background: #fffef9;
+}
+
+.signal-topline {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.tag {
+  padding: 4px 8px;
+  border-radius: 999px;
+  font-size: 0.75rem;
+  font-weight: 700;
+  background: #ece2d3;
+}
+
+.tag-bullish {
+  background: rgba(20, 104, 108, 0.16);
+  color: var(--teal);
+}
+
+.tag-bearish {
+  background: rgba(196, 91, 40, 0.16);
+  color: var(--accent);
+}
+
+.tag-neutral,
+.tag-quality {
+  color: var(--muted);
+}
+
+.chip-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.chip {
+  padding: 6px 10px;
+  border-radius: 999px;
+  background: #efe6d8;
+  font-size: 0.78rem;
+}
+
+.decision-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.subpanel {
+  padding: 14px;
+  border-radius: 18px;
+  background: #fffef9;
+  border: 1px solid var(--line);
+}
+
+.risk-bucket {
+  margin-top: 14px;
+}
+
+.risk-bucket-title {
+  margin-bottom: 8px;
+  font-weight: 700;
+  color: var(--teal);
+}
+
+.intent-row,
+.table-head,
+.table-row {
+  display: grid;
+  grid-template-columns: 1fr auto auto;
+  gap: 12px;
+  padding: 8px 0;
+  border-bottom: 1px solid rgba(31, 27, 22, 0.08);
+}
+
+.table-head,
+.table-row {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
+.banner.error {
+  grid-column: 1 / -1;
+  padding: 14px 18px;
+  border-radius: 16px;
+  background: rgba(203, 63, 63, 0.1);
+  color: #8f1f1f;
+}
+
+@media (max-width: 1100px) {
+  .app-shell {
+    grid-template-columns: 1fr;
+  }
+
+  .main-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .hero-card,
+  .decision-grid {
+    grid-template-columns: 1fr;
+    display: grid;
+  }
+}
+

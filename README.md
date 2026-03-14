@@ -1,179 +1,178 @@
-# A-Share Probability Research
+# A-Share Local Decision Workstation
 
-A lightweight A-share probabilistic research system for daily-updated 60-day terminal return distributions and price-touch probabilities.
+[Chinese](README.zh-CN.md)
 
-中文摘要：这是一个面向 A 股个股研究的轻量级概率预测系统，重点输出未来 60 个交易日的期末收益分布与关键价位触达概率，并在收盘后生成中文研究报告。当前以 `601727` 和 `002202` 为目标股票，训练时使用更大的相关股票池进行横截面建模。完整中文说明见 [README.zh-CN.md](README.zh-CN.md)。
+This repository has been rebuilt from the old probability-research project into a local A-share decision workstation inspired by the `AI-Trader` flow:
 
-This project focuses on two target stocks, `601727` and `002202`, while training on a broader cross-sectional universe of related A-share names. Instead of predicting a single target price, it estimates:
+- `market -> text -> research -> decision -> risk -> simulation`
+- `FastAPI` backend
+- `React + Vite` cockpit
+- `DeepSeek` primary LLM with `Qwen` fallback
+- deterministic risk shell around LLM trade intents
+- daily A-share simulation with `T+1`, lot-size, limit-up/limit-down, fees, and stamp tax
 
-- terminal return bucket probabilities over the next 60 trading days
-- touch probabilities for `+/-5%` to `+/-30%` price levels within the next 60 trading days
-- a daily confidence flag and a Chinese analyst-style research report after the close
+It is designed for local single-user research and paper trading, not for social signals or copy trading.
 
-## Highlights
+## Current Status
 
-- focuses on modeling future return distributions instead of a single-point target-price guess
-- separates `terminal distribution` and `touch probability` into two distinct but related prediction tasks
-- combines `GBM`, `state bootstrap`, and `LightGBM` into a calibrated ensemble
-- outputs CSV, Markdown, and HTML artifacts for both programmatic consumption and manual review
-- emphasizes calibration with walk-forward backtesting and metrics such as `log loss`, `RPS`, `Brier`, and `ECE`
+The current `v1` is working in these areas:
 
-## Why This Project
+- market data refresh with `akshare` and a sample fallback provider
+- lightweight prior scoring for candidate selection
+- real text ingestion for A-shares:
+  - Eastmoney stock news via `stock_news_em`
+  - CNINFO disclosure lists via `stock_zh_a_disclosure_report_cninfo`
+- `ResearchAgent` and `DecisionAgent` with structured JSON outputs
+- deterministic risk review before any order enters simulation
+- daily simulation and portfolio state persistence in SQLite
+- local cockpit for reviewing signals, portfolio, and run history
 
-Most retail-facing stock prediction projects reduce the problem to a single label such as "up or down tomorrow". This repository treats the task as a probability distribution problem:
+Still intentionally out of scope for `v1`:
 
-- `terminal distribution`: where the stock is likely to finish after 60 trading days
-- `touch probability`: whether the stock is likely to hit a target level at any point during that window
-- `calibration`: whether a predicted 70% event actually behaves like a 70% event in historical validation
-
-The goal is research quality and probabilistic interpretability, not trading automation.
+- real brokerage execution
+- full announcement body extraction
+- intraday or high-frequency trading
+- portfolio optimization beyond the current rule-based risk layer
 
 ## Architecture
 
-The pipeline is organized into six layers:
-
-1. `data ingestion`: AkShare/Eastmoney-based fetchers, caching, fallbacks, and universe resolution
-2. `feature engineering`: price, volatility, momentum, volume, relative strength, valuation, and basic fundamental features
-3. `label generation`: 60-day terminal return buckets and target-touch event labels
-4. `modeling`: GBM baseline, state bootstrap baseline, and global LightGBM models
-5. `calibration and constraints`: temperature scaling, isotonic calibration, and monotonic touch-probability constraints
-6. `backtest and reporting`: walk-forward evaluation, metrics, plots, and daily HTML/Markdown reports
-
-```mermaid
-flowchart LR
-    A["CLI / Scheduler"] --> B["Data Ingestion"]
-    B --> C["Local Cache"]
-    C --> D["Feature Engineering"]
-    C --> E["Label Generation"]
-    D --> F["Model Dataset"]
-    E --> F
-    F --> G["GBM Baseline"]
-    F --> H["State Bootstrap"]
-    F --> I["Global LightGBM"]
-    G --> J["Ensemble"]
-    H --> J
-    I --> J
-    J --> K["Calibration"]
-    K --> L["Monotonic Constraints"]
-    L --> M["Daily Predictions"]
-    F --> N["Walk-forward Backtest"]
-    M --> O["CSV / Markdown / HTML Reports"]
-    N --> O
+```text
+service/server      FastAPI API
+service/frontend    React + Vite cockpit
+engine/market       A-share market data and prior scores
+engine/text         Real text providers and derived events
+engine/agents       ResearchAgent / DecisionAgent / LLM providers
+engine/risk         Deterministic risk shell
+engine/sim          Daily A-share simulation
+engine/execution    Future vn.py / QMT adapters
+engine/storage      SQLite persistence
+storage/            Local artifacts, parquet, jsonl, state.db
+tests/              Backend tests
 ```
 
-## Current Scope
+## Decision Flow
 
-- Target outputs: `601727` and `002202`
-- Training mode: global cross-sectional model over a larger related-stock universe
-- Update frequency: daily after market close
-- Data frequency: daily bars only
-- Not included in phase one: intraday refresh, NLP/news features, automatic execution
+1. Refresh market data and compute prior signals.
+2. Select a focus universe from long candidates, avoid candidates, and current positions.
+3. Pull real text events for focus symbols and merge them with derived risk/price events.
+4. Generate per-symbol `ResearchCard` outputs.
+5. Aggregate them into portfolio-level `TradeIntent` proposals.
+6. Run deterministic risk checks that can approve, clip, delay, or reject each intent.
+7. Send approved intents into the daily A-share simulator.
+8. Persist runs, cards, decisions, risk reviews, positions, fills, and artifacts.
 
-## Quick Start
+## Data Sources
 
-1. Install dependencies:
+`v1` currently uses:
 
-```bash
+- `akshare` market data for A-share symbols and daily bars
+- `akshare.stock_news_em(symbol)` for stock news
+- `akshare.stock_zh_a_disclosure_report_cninfo(...)` for disclosure metadata
+
+Important limitation:
+
+- announcement ingestion currently stores title, timestamp, and URL, not full filing body text
+
+## Environment
+
+An isolated Conda environment is provided:
+
+```powershell
+conda env create -f environment.yml
+conda activate ashare-agent
 python -m pip install -r requirements.txt
 ```
 
-2. Refresh market data:
+Verified backend runtime:
 
-```bash
-python run_cli.py refresh-data --config configs/default.json
-```
+- Python `3.11`
 
-3. Train the global model:
+## Configuration
 
-```bash
-python run_cli.py train-global --config configs/default.json
-```
-
-4. Run walk-forward backtest:
-
-```bash
-python run_cli.py backtest --config configs/default.json
-```
-
-5. Generate prediction CSVs:
-
-```bash
-python run_cli.py score-daily --config configs/default.json
-```
-
-6. Generate the daily report:
-
-```bash
-python run_cli.py report-daily --config configs/default.json
-```
-
-7. Run the full daily pipeline:
+Copy `.env.example` into your shell environment or set variables directly:
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File scripts\run_live.ps1
+$env:DEEPSEEK_API_KEY="your-key"
+$env:QWEN_API_KEY="your-key"
+$env:ASHARE_MARKET_PROVIDER="akshare"
+$env:ASHARE_TEXT_PROVIDER="akshare"
+$env:ASHARE_TEXT_LOOKBACK_DAYS="30"
+$env:ASHARE_MAX_NEWS_PER_SYMBOL="6"
+$env:ASHARE_MAX_ANNOUNCEMENTS_PER_SYMBOL="6"
 ```
 
-## Repository Layout
+Useful options:
 
-```text
-src/astock_prob/
-  data/         data providers, caching, universe resolution
-  features/     feature engineering
-  labels/       forward return and touch-event labels
-  modeling/     baselines, ML models, calibration, constraints
-  backtest/     walk-forward evaluation
-  reporting/    Markdown/HTML/chart generation
-configs/        default and live-run configurations
-docs/           architecture notes
-scripts/        helper entrypoints
-tests/          unit and integration tests
+- `DEEPSEEK_MODEL`
+- `QWEN_MODEL`
+- `ASHARE_STORAGE_ROOT`
+- `ASHARE_DEFAULT_WATCHLIST`
+- `ASHARE_BLACKLIST_SYMBOLS`
+
+If both LLM providers are unavailable, the system automatically degrades into risk-only mode and blocks new entries.
+
+## Running
+
+Backend:
+
+```powershell
+python -m service.server.main
 ```
 
-## Main Outputs
+Or use the PowerShell helper:
 
-Files are written to `artifacts/reports/`, including:
+```powershell
+.\scripts\run_backend.ps1
+```
 
-- `daily_terminal_predictions.csv`
-- `daily_touch_predictions.csv`
-- `daily_model_health.json`
-- `daily_report.md`
-- `daily_report.html`
+Frontend:
 
-Typical outputs include:
+```powershell
+cd service/frontend
+npm install
+npm run dev
+```
 
-- terminal return probability tables by stock and return bucket
-- target-touch probability ladders for `+/-5%` to `+/-30%`
-- confidence flags based on data completeness, drift, and recent model quality
-- daily HTML summaries for manual review after market close
+Default local addresses:
 
-## Metrics Used
+- API: `http://127.0.0.1:8000`
+- Cockpit: `http://127.0.0.1:5173`
 
-The project evaluates forecast quality with probability-aware metrics:
+## API
 
-- `terminal_log_loss`
-- `terminal_rps`
-- `touch_brier_mean`
-- `touch_ece_mean`
+- `GET /api/health`
+- `POST /api/data/refresh-market`
+- `POST /api/data/refresh-text`
+- `POST /api/research/run`
+- `POST /api/decision/run`
+- `POST /api/risk/run`
+- `POST /api/sim/run-daily`
+- `GET /api/dashboard/summary`
+- `GET /api/signals/today`
+- `GET /api/portfolio/current`
+- `GET /api/runs/{run_id}`
+- `GET /api/backtest/summary`
 
-These metrics are intended to measure both predictive quality and calibration quality.
+## Testing
 
-## Design Choices
+Backend tests:
 
-- `daily bars only`: phase one prioritizes robustness and reproducibility over intraday complexity
-- `cross-sectional training`: the model trains on a broader related-stock universe instead of only the target names
-- `calibration-first`: predicted probabilities are treated as outputs that must be evaluated and calibrated, not just ranked
-- `free-data aware`: the pipeline assumes API instability and uses local caching plus fallbacks
+```powershell
+D:\miniconda\envs\ashare-agent\python.exe -m pytest -q
+```
+
+The latest verification passed with `6` tests.
 
 ## Roadmap
 
-- expand the live training universe closer to the configured `80-120+` names
-- rerun full walk-forward backtests on the larger universe and refresh health scoring
-- add sector-relative and market-regime features with stronger point-in-time validation
-- improve report pages with richer charts and side-by-side model component diagnostics
-- add optional CSV adapters for users who want to bypass unstable public APIs
+High-value next steps:
 
-## Notes
+- announcement body extraction and caching
+- better A-share text coverage and deduplication
+- regime-aware risk throttling
+- vn.py / QMT execution adapter
+- more explicit run auditing in the frontend
 
-- Free data sources are convenient but not fully stable. Fetch latency, intermittent failures, and partial field coverage should be expected.
-- This repository is a research system, not investment advice.
-- Reported probabilities should be interpreted as model outputs under the available data and validation setup, not guaranteed market outcomes.
+## License
+
+No standalone license file is currently included in this rebuilt repository. Add one before distributing the project externally.

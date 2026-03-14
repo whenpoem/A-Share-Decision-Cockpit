@@ -1,176 +1,176 @@
-# A 股概率研究系统
+# A 股本地决策工作台
 
-这是一个面向 A 股个股研究的轻量级概率预测项目，用于在日频数据基础上，持续更新未来 `60` 个交易日的：
+[English](README.md)
 
-- 期末收益区间概率分布
-- 关键涨跌幅目标的区间触达概率
-- 每日模型置信度与中文研究报告
+这个仓库已经从旧的“概率研究项目”重建为一套本地 A 股决策工作台，核心流程参考 `AI-Trader`，但定位不是信号社区，而是单人本地研究和模拟盘：
 
-项目当前以 `601727` 和 `002202` 为目标输出股票，但训练时不只使用这两只股票，而是使用更大的相关股票池做横截面建模，以提升样本量、稳定性和概率校准质量。
+- `market -> text -> research -> decision -> risk -> simulation`
+- `FastAPI` 后端
+- `React + Vite` 前端驾驶舱
+- `DeepSeek` 主模型，`Qwen` 回退
+- `LLM 提交易意图 + 确定性风控壳`
+- A 股日频模拟盘，内置 `T+1`、100 股一手、涨跌停、手续费、印花税
 
-## 项目亮点
+## 当前完成度
 
-- 我希望通过这个项目去建模未来收益的概率分布
-- 将 `期末分布` 与 `触达某个百分比的概率` 明确拆成两个不同任务
-- 使用 `GBM + bootstrap + LightGBM` 做概率融合
-- 输出 CSV、Markdown、HTML 三种结果，兼容了程序和人工阅读
-- 强调概率校准，使用 `log loss`、`RPS`、`Brier`、`ECE` 等指标评估模型
+目前 `v1` 已经完成：
 
-## 这个项目在做什么
+- 基于 `akshare` 的 A 股行情刷新，并带有 sample fallback
+- 轻量级 prior model，用于候选池筛选
+- 真实 A 股文本接入：
+  - 东方财富个股新闻 `stock_news_em`
+  - 巨潮资讯公告列表 `stock_zh_a_disclosure_report_cninfo`
+- `ResearchAgent` 和 `DecisionAgent`，输出结构化 JSON
+- 独立风控审批层，能够 `approved / clipped / delayed / rejected`
+- A 股日频模拟盘和 SQLite 状态持久化
+- 本地前端驾驶舱，可查看信号、组合、运行结果
 
-大多数常见的股票预测项目会给出一个单点目标，或者只做涨跌二分类。这个项目的核心思路不同：
+当前还没有做的内容：
 
-- `terminal distribution`：预测 60 个交易日后，股票更可能落在哪个收益区间
-- `touch probability`：预测未来 60 个交易日内，股票是否会在任意一天触达某个目标价位
-- `calibration`：判断模型给出的 70% 概率，历史上是否真的接近 70% 发生率
+- 真实券商执行
+- 公告正文全文抓取
+- 高频 / 日内交易
+- 更复杂的组合优化器
 
+## 架构目录
 
-## 架构概览
+```text
+service/server      FastAPI API
+service/frontend    React + Vite 驾驶舱
+engine/market       A 股行情与 prior score
+engine/text         真实文本源与派生事件
+engine/agents       ResearchAgent / DecisionAgent / LLM provider
+engine/risk         确定性风控层
+engine/sim          A 股日频模拟盘
+engine/execution    未来 vn.py / QMT 执行适配层
+engine/storage      SQLite 持久化
+storage/            本地 artifacts、parquet、jsonl、state.db
+tests/              后端测试
+```
 
-整个项目按六层组织：
+## 决策流程
 
-1. `data ingestion`
-   - AkShare / Eastmoney 数据抓取
-   - 本地缓存
-   - 股票池解析和失败回退
-2. `feature engineering`
-   - 收益率、波动率、ATR、量价、相对强弱、估值、财务特征
-3. `label generation`
-   - 60 日前瞻终值收益分桶
-   - `+/-5%` 到 `+/-30%` 的触达事件标签
-4. `modeling`
-   - `GBM` 基线
-   - 相似状态 `bootstrap` 基线
-   - 全局横截面 `LightGBM`
-5. `calibration and constraints`
-   - 温度缩放
-   - isotonic 校准
-   - 触达概率单调约束
-6. `backtest and reporting`
-   - walk-forward 回测
-   - 指标统计
-   - Markdown / HTML / 图表输出
+1. 刷新行情并计算 prior signal。
+2. 从多头候选、风险候选和当前持仓中选出 focus universe。
+3. 为 focus symbols 拉取真实新闻/公告，并和派生事件合并。
+4. 生成逐股票的 `ResearchCard`。
+5. 聚合成组合级别的 `TradeIntent`。
+6. 进入确定性风控，决定通过、裁剪、延后还是拒绝。
+7. 通过后的交易意图进入 A 股日频模拟盘。
+8. 持久化 run、研究卡、决策、风控、持仓、成交和 artifacts。
 
-## 当前范围
+## 当前文本数据源
 
-- 目标输出股票：`601727`、`002202`
-- 更新频率：每日收盘后
-- 数据频率：日线
-- 训练方式：更大相关股票池的全局横截面模型
-- 第一阶段不包含：
-  - 盘中分钟级刷新
-  - NLP/新闻因子
-  - 自动交易执行
+`v1` 现在接的是：
 
-## 快速开始
+- `akshare` A 股行情
+- `akshare.stock_news_em(symbol)` 个股新闻
+- `akshare.stock_zh_a_disclosure_report_cninfo(...)` 公告元数据
 
-1. 安装依赖
+现阶段的限制：
 
-```bash
+- 公告侧目前保存的是“标题 + 时间 + 链接”，还不是全文正文
+
+## 环境配置
+
+已经提供独立的 Conda 环境：
+
+```powershell
+conda env create -f environment.yml
+conda activate ashare-agent
 python -m pip install -r requirements.txt
 ```
 
-2. 刷新市场数据
+当前后端验证使用的是：
 
-```bash
-python run_cli.py refresh-data --config configs/default.json
-```
+- Python `3.11`
 
-3. 训练全局模型
+## 环境变量
 
-```bash
-python run_cli.py train-global --config configs/default.json
-```
-
-4. 运行 walk-forward 回测
-
-```bash
-python run_cli.py backtest --config configs/default.json
-```
-
-5. 生成每日预测 CSV
-
-```bash
-python run_cli.py score-daily --config configs/default.json
-```
-
-6. 生成日报
-
-```bash
-python run_cli.py report-daily --config configs/default.json
-```
-
-7. 运行整套日更流水线
+可以参考 `.env.example`，或者直接在 PowerShell 里设置：
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File scripts\run_live.ps1
+$env:DEEPSEEK_API_KEY="your-key"
+$env:QWEN_API_KEY="your-key"
+$env:ASHARE_MARKET_PROVIDER="akshare"
+$env:ASHARE_TEXT_PROVIDER="akshare"
+$env:ASHARE_TEXT_LOOKBACK_DAYS="30"
+$env:ASHARE_MAX_NEWS_PER_SYMBOL="6"
+$env:ASHARE_MAX_ANNOUNCEMENTS_PER_SYMBOL="6"
 ```
 
-## 仓库结构
+常用可选项：
 
-```text
-src/astock_prob/
-  data/         数据源、缓存、股票池解析
-  features/     特征工程
-  labels/       标签生成
-  modeling/     基线模型、ML 模型、校准、约束
-  backtest/     walk-forward 回测
-  reporting/    Markdown/HTML/图表输出
-configs/        配置文件
-docs/           架构文档
-scripts/        辅助脚本
-tests/          单元测试与集成测试
+- `DEEPSEEK_MODEL`
+- `QWEN_MODEL`
+- `ASHARE_STORAGE_ROOT`
+- `ASHARE_DEFAULT_WATCHLIST`
+- `ASHARE_BLACKLIST_SYMBOLS`
+
+如果两个 LLM 都不可用，系统会自动降级到 `risk-only mode`，禁止新开仓。
+
+## 启动方式
+
+后端：
+
+```powershell
+python -m service.server.main
 ```
 
-## 主要输出
+或者直接用脚本：
 
-主要产物会写到 `artifacts/reports/`，包括：
+```powershell
+.\scripts\run_backend.ps1
+```
 
-- `daily_terminal_predictions.csv`
-- `daily_touch_predictions.csv`
-- `daily_model_health.json`
-- `daily_report.md`
-- `daily_report.html`
+前端：
 
-这些输出通常包含：
+```powershell
+cd service/frontend
+npm install
+npm run dev
+```
 
-- 终值收益分布表
-- 关键阈值触达概率表
-- 模型健康度与置信度标记
-- 收盘后的可视化日报
+默认地址：
 
-## 使用的评估指标
+- API: `http://127.0.0.1:8000`
+- Cockpit: `http://127.0.0.1:5173`
 
-项目使用概率预测指标，而不是只看方向命中率：
+## API 列表
 
-- `terminal_log_loss`
-- `terminal_rps`
-- `touch_brier_mean`
-- `touch_ece_mean`
+- `GET /api/health`
+- `POST /api/data/refresh-market`
+- `POST /api/data/refresh-text`
+- `POST /api/research/run`
+- `POST /api/decision/run`
+- `POST /api/risk/run`
+- `POST /api/sim/run-daily`
+- `GET /api/dashboard/summary`
+- `GET /api/signals/today`
+- `GET /api/portfolio/current`
+- `GET /api/runs/{run_id}`
+- `GET /api/backtest/summary`
 
-其中：
+## 测试
 
-- `log loss / RPS` 用于衡量期末分布质量
-- `Brier` 用于衡量触达事件概率误差
-- `ECE` 用于衡量概率校准质量
+后端测试命令：
 
-## 设计取舍
+```powershell
+D:\miniconda\envs\ashare-agent\python.exe -m pytest -q
+```
 
-- 只做日线：优先保证稳定性和复现性
-- 用横截面训练：避免只用两只股票导致样本过少
-- 先做概率校准：让输出的 70% 更接近“真实 70%”
-- 兼容免费数据源不稳定：依赖缓存和失败回退逻辑
+当前已经验证通过 `6` 个测试。
 
-## 路线图
+## 下一步建议
 
-- 将实时训练股票池扩展到配置目标的 `80-120+` 只
-- 在更大股票池上重跑完整 walk-forward 回测
-- 增强市场状态和行业相对强弱特征
-- 优化报告页面与模型分项对比图
-- 增加 CSV 数据适配器，降低对公共 API 稳定性的依赖
+最值得继续推进的方向：
 
-## 说明
+- 公告正文抓取与缓存
+- 更完整的 A 股文本覆盖和去重
+- 与市场 regime 联动的动态风控
+- `vn.py / QMT` 执行适配层
+- 前端增加更明确的 run 审计与回溯
 
-- 免费数据接口存在延迟、失败和字段不稳定的问题
-- 本仓库属于研究项目，不构成任何投资建议
-- 输出概率是模型结果，不代表对未来市场结果的保证
+## License
+
+当前这个重建后的仓库还没有重新放回独立的 License 文件；如果你准备公开分发，建议先补上。
