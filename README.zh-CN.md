@@ -180,4 +180,4 @@ D:\miniconda\envs\ashare-agent\python.exe -m pytest -q
 
 ## License
 
-当前这个重建后的仓库还没有重新放回独立的 License 文件；如果你准备公开分发，建议先补上。
+本项目采用 MIT License，详见 [LICENSE](LICENSE)。

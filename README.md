@@ -183,4 +183,4 @@ High-value next steps:
 
 ## License
 
-No standalone license file is currently included in this rebuilt repository. Add one before distributing the project externally.
+This project is released under the MIT License. See [LICENSE](LICENSE).
