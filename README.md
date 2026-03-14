@@ -1,89 +1,114 @@
-# A-Share Local Decision Workstation
+# A-Share Decision Cockpit
 
-[Chinese](README.zh-CN.md)
+[中文说明](README.zh-CN.md)
 
-This repository has been rebuilt from the old probability-research project into a local A-share decision workstation inspired by the `AI-Trader` flow:
+A local A-share AI decision workstation with three operating modes:
 
-- `market -> text -> research -> decision -> risk -> simulation`
-- `FastAPI` backend
-- `React + Vite` cockpit
-- `DeepSeek` primary LLM with `Qwen` fallback
-- deterministic risk shell around LLM trade intents
-- daily A-share simulation with `T+1`, lot-size, limit-up/limit-down, fees, and stamp tax
+- `Backtest`: daily walk-forward backtesting
+- `Paper`: approval-based simulated trading
+- `Live-ready`: manual-approval live workflow with a mock broker and a QMT/Ptrade adapter contract
 
-It is designed for local single-user research and paper trading workflows.
+The system combines structured market priors, real text ingestion, LLM research and decision agents, deterministic risk control, continuous thesis memory, and a React control cockpit.
 
-## Current Status
+## What Is Included
 
-The current `v1` is working in these areas:
+- `FastAPI` backend control plane
+- `React + Vite` cockpit frontend
+- `DeepSeek` as the primary LLM provider
+- `Qwen` as the fallback LLM provider
+- A deterministic risk shell around all trade intents
+- A-share trading rules in simulation:
+  - `T+1`
+  - 100-share lot size
+  - limit-up / limit-down blocking
+  - fees and stamp tax
+- position memory, thesis memory, decision journal, and portfolio memory
+- task tracking, mode state tracking, approval queues, and diagnostics
 
-- market data refresh with `akshare` and a sample fallback provider
-- lightweight prior scoring for candidate selection
-- real text ingestion for A-shares:
-  - Eastmoney stock news via `stock_news_em`
-  - CNINFO disclosure lists via `stock_zh_a_disclosure_report_cninfo`
-  - announcement PDF body extraction and local cache
-- `ResearchAgent` and `DecisionAgent` with structured JSON outputs
-- deterministic risk review before any order enters simulation
-- daily simulation and portfolio state persistence in SQLite
-- local cockpit for reviewing signals, portfolio, and run history
+## V2 Status
 
-Still intentionally out of scope for `v1`:
+The current repository is at a usable `v2` baseline.
 
-- real brokerage execution
-- full announcement body extraction
-- intraday or high-frequency trading
-- portfolio optimization beyond the current rule-based risk layer
+Implemented:
+
+- three-mode workflow:
+  - `Backtest`
+  - `Paper`
+  - `Live-ready`
+- daily walk-forward backtesting with persisted results
+- approval-based paper trading
+- live session control, approval flow, and broker status handling
+- mock live broker for local end-to-end testing
+- `QMT/Ptrade` adapter contract behind a feature gate
+- market data refresh with `akshare` and a sample fallback
+- real A-share text ingestion:
+  - Eastmoney stock news
+  - CNINFO disclosure metadata
+  - announcement PDF download, text extraction, and local cache
+- `ResearchAgent` and `DecisionAgent` with schema-validated JSON outputs
+- deterministic risk review with `approved / clipped / delayed / rejected`
+- memory persistence for holdings, thesis evolution, and portfolio state
+- frontend cockpit for control, approvals, backtests, signals, memory, and diagnostics
+
+Current boundary:
+
+- real QMT/Ptrade order routing still needs local broker SDK wiring on your machine
+- the `Live-ready` path already includes the API, state machine, approval queue, mock execution, and adapter contract
+- the public text coverage is still daily-research oriented, not intraday news infrastructure
 
 ## Architecture
 
 ```text
-service/server      FastAPI API
+service/server      FastAPI API and WebSocket status feed
 service/frontend    React + Vite cockpit
-engine/market       A-share market data and prior scores
-engine/text         Real text providers and derived events
+engine/market       A-share market data and prior signals
+engine/text         Text ingestion and disclosure caching
 engine/agents       ResearchAgent / DecisionAgent / LLM providers
-engine/risk         Deterministic risk shell
-engine/sim          Daily A-share simulation
-engine/execution    Future vn.py / QMT adapters
-engine/storage      SQLite persistence
-storage/            Local artifacts, parquet, jsonl, state.db
+engine/risk         Deterministic risk review
+engine/sim          Daily A-share simulation and mark-to-market
+engine/memory       Position memory / thesis memory / journal
+engine/execution    Mock broker and live-ready adapter contract
+engine/runtime      Task manager
+engine/storage      SQLite stores for mode data and system state
+storage/backtest    Backtest mode artifacts and state
+storage/paper       Paper mode artifacts and state
+storage/live        Live mode artifacts and state
 tests/              Backend tests
 ```
 
 ## Decision Flow
 
 1. Refresh market data and compute prior signals.
-2. Select a focus universe from long candidates, avoid candidates, and current positions.
-3. Pull real text events for focus symbols and merge them with derived risk/price events.
-4. Generate per-symbol `ResearchCard` outputs.
-5. Aggregate them into portfolio-level `TradeIntent` proposals.
-6. Run deterministic risk checks that can approve, clip, delay, or reject each intent.
-7. Send approved intents into the daily A-share simulator.
-8. Persist runs, cards, decisions, risk reviews, positions, fills, and artifacts.
+2. Select the focus universe from long candidates, avoid candidates, and current positions.
+3. Pull news and disclosure events for focus symbols.
+4. Build per-symbol `ResearchCard` outputs.
+5. Aggregate them into a portfolio-level `TradeIntentSet`.
+6. Run deterministic risk checks.
+7. Route the result by mode:
+   - `Backtest`: execute automatically in the daily simulator
+   - `Paper`: place orders into the approval queue
+   - `Live-ready`: place orders into the live approval queue
+8. Persist runs, journals, positions, approvals, orders, fills, and artifacts.
 
 ## Data Sources
 
-`v1` currently uses:
+The current setup uses:
 
-- `akshare` market data for A-share symbols and daily bars
-- `akshare.stock_news_em(symbol)` for stock news
-- `akshare.stock_zh_a_disclosure_report_cninfo(...)` for disclosure metadata
+- `akshare` for A-share symbols and daily bars
+- `akshare.stock_news_em(symbol)` for Eastmoney stock news
+- `akshare.stock_zh_a_disclosure_report_cninfo(...)` for CNINFO disclosure metadata
 
-Announcement handling now downloads the disclosure PDF when available, extracts body text locally,
-and caches three artifacts:
+Announcement handling stores:
 
-- `storage/text/disclosures/<announcement_id>.json`
-- `storage/text/disclosures/pdf/<announcement_id>.pdf`
-- `storage/text/disclosures/text/<announcement_id>.txt`
+- `storage/<mode>/text/disclosures/<announcement_id>.json`
+- `storage/<mode>/text/disclosures/pdf/<announcement_id>.pdf`
+- `storage/<mode>/text/disclosures/text/<announcement_id>.txt`
 
-Current limitation:
-
-- very long filings are truncated before being passed into the event stream; full extracted text remains in the local cache
+Long filings are truncated before entering the agent event stream. Full extracted text stays in the local cache.
 
 ## Environment
 
-An isolated Conda environment is provided:
+Create and activate the dedicated Conda environment:
 
 ```powershell
 conda env create -f environment.yml
@@ -97,27 +122,37 @@ Verified backend runtime:
 
 ## Configuration
 
-Copy `.env.example` into your shell environment or set variables directly:
+Set environment variables directly or load them from `.env.example`.
+
+Common variables:
 
 ```powershell
 $env:DEEPSEEK_API_KEY="your-key"
 $env:QWEN_API_KEY="your-key"
 $env:ASHARE_MARKET_PROVIDER="akshare"
 $env:ASHARE_TEXT_PROVIDER="akshare"
-$env:ASHARE_TEXT_LOOKBACK_DAYS="30"
-$env:ASHARE_MAX_NEWS_PER_SYMBOL="6"
-$env:ASHARE_MAX_ANNOUNCEMENTS_PER_SYMBOL="6"
+$env:ASHARE_STORAGE_ROOT="D:\bug\storage"
+```
+
+Live-related variables:
+
+```powershell
+$env:ASHARE_LIVE_ENABLED="true"
+$env:ASHARE_LIVE_BROKER="mock"
+$env:ASHARE_LIVE_ACCOUNT_ID="demo-account"
 ```
 
 Useful options:
 
 - `DEEPSEEK_MODEL`
 - `QWEN_MODEL`
-- `ASHARE_STORAGE_ROOT`
 - `ASHARE_DEFAULT_WATCHLIST`
 - `ASHARE_BLACKLIST_SYMBOLS`
+- `ASHARE_QMT_TERMINAL_PATH`
+- `ASHARE_QMT_USER`
+- `ASHARE_QMT_PASSWORD`
 
-If both LLM providers are unavailable, the system automatically degrades into risk-only mode and blocks new entries.
+If both LLM providers are unavailable, the system falls back to risk-only behavior and blocks new entries.
 
 ## Running
 
@@ -125,12 +160,6 @@ Backend:
 
 ```powershell
 python -m service.server.main
-```
-
-Or use the PowerShell helper:
-
-```powershell
-.\scripts\run_backend.ps1
 ```
 
 Frontend:
@@ -145,41 +174,109 @@ Default local addresses:
 
 - API: `http://127.0.0.1:8000`
 - Cockpit: `http://127.0.0.1:5173`
+- Status WebSocket: `ws://127.0.0.1:8000/ws/status`
 
-## API
+## How To Use
 
-- `GET /api/health`
-- `POST /api/data/refresh-market`
-- `POST /api/data/refresh-text`
-- `POST /api/research/run`
-- `POST /api/decision/run`
-- `POST /api/risk/run`
+### 1. Backtest
+
+- Open the cockpit
+- Switch mode to `BACKTEST`
+- Go to the `Backtest` page
+- Set:
+  - `start date`
+  - `end date`
+  - `initial capital`
+  - optional `watchlist`
+- Run the backtest
+- Review:
+  - task status
+  - metrics
+  - equity curve
+  - daily decision timeline
+
+### 2. Paper Trading
+
+- Switch mode to `PAPER`
+- Run a paper cycle from `Control Center`
+- Open `Paper Trading`
+- Review pending approvals
+- Approve or reject each ticket
+- Check updated positions, memory, and diagnostics
+
+### 3. Live-ready
+
+- Set live-related environment variables
+- Start a live session from `Control Center`
+- Open `Live Trading`
+- Review broker status and approval queue
+- Approve tickets manually
+
+With `ASHARE_LIVE_BROKER=mock`, the full approval-to-fill loop works locally.
+
+With a real broker path, the adapter contract is ready and the local SDK wiring is still required.
+
+## API Overview
+
+Core endpoints:
+
+- `POST /api/control/run-backtest`
+- `POST /api/control/run-paper-cycle`
+- `POST /api/control/run-live-cycle`
+- `POST /api/control/start-live-session`
+- `POST /api/control/stop-live-session`
+- `POST /api/control/rebuild-memory`
+- `GET /api/status/system`
+- `GET /api/status/tasks`
+- `GET /api/status/mode/{mode}`
+- `GET /api/backtest/runs`
+- `GET /api/backtest/runs/{run_id}`
+- `GET /api/paper/account`
+- `GET /api/live/account`
+- `GET /api/paper/approval-queue`
+- `GET /api/live/approval-queue`
+- `POST /api/paper/approve/{ticket_id}`
+- `POST /api/paper/reject/{ticket_id}`
+- `POST /api/live/approve/{ticket_id}`
+- `POST /api/live/reject/{ticket_id}`
+- `GET /api/dashboard/summary?mode=paper|live|backtest`
+- `GET /api/signals/today?mode=paper|live|backtest`
+- `GET /api/memory/{mode}`
+- `WS /ws/status`
+
+Compatibility endpoint kept for older scripts:
+
 - `POST /api/sim/run-daily`
-- `GET /api/dashboard/summary`
-- `GET /api/signals/today`
-- `GET /api/portfolio/current`
-- `GET /api/runs/{run_id}`
-- `GET /api/backtest/summary`
 
 ## Testing
 
-Backend tests:
+Backend:
 
 ```powershell
 D:\miniconda\envs\ashare-agent\python.exe -m pytest -q
 ```
 
-The latest verification passed with `6` tests.
+Frontend build:
+
+```powershell
+cd service/frontend
+npm run build
+```
+
+Latest verification:
+
+- backend: `9 passed`
+- frontend build: passed
 
 ## Roadmap
 
-High-value next steps:
+Next high-value steps:
 
-- announcement body extraction and caching
-- better A-share text coverage and deduplication
-- regime-aware risk throttling
-- vn.py / QMT execution adapter
-- more explicit run auditing in the frontend
+- local QMT/Ptrade SDK wiring on the live adapter
+- richer A-share text coverage and source ranking
+- regime-aware throttling beyond the current rule set
+- backtest result drill-down charts in the cockpit
+- stronger execution audit views for live mode
 
 ## License
 
