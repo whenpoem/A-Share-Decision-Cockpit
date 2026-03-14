@@ -5,6 +5,8 @@ from dataclasses import dataclass
 from datetime import datetime
 from typing import Any
 
+from pydantic import BaseModel, Field
+
 from engine.agents.providers import LLMUnavailableError, ProviderChain
 from engine.config import Settings
 from engine.types import ResearchCard, SymbolEventPack, TradeIntent, TradeIntentSet
@@ -35,6 +37,64 @@ class AgentResult:
     payload: object
     degrade_mode: bool
     call_records: list[dict[str, str]]
+
+
+class PartialTradeIntentSet(BaseModel):
+    as_of_date: datetime | None = None
+    market_view: str | None = None
+    cash_target: float | None = None
+    trade_intents: list[TradeIntent] = Field(default_factory=list)
+    rejected_symbols: list[str] = Field(default_factory=list)
+    portfolio_risks: list[str] = Field(default_factory=list)
+    decision_confidence: float | None = None
+    rationale: str | None = None
+    provider_name: str = "system"
+
+
+def _clamp_unit(value: float) -> float:
+    return max(0.0, min(1.0, float(value)))
+
+
+def _finalize_trade_intent_set(
+    payload: PartialTradeIntentSet,
+    *,
+    as_of_date: datetime,
+    market_view: str,
+) -> TradeIntentSet:
+    trade_intents = payload.trade_intents or []
+    inferred_cash_target = 1.0
+    if trade_intents:
+        target_sum = sum(max(intent.target_weight, 0.0) for intent in trade_intents)
+        inferred_cash_target = max(0.0, 1.0 - min(target_sum, 1.0))
+    cash_target = _clamp_unit(
+        payload.cash_target if payload.cash_target is not None else inferred_cash_target
+    )
+    if payload.decision_confidence is not None:
+        decision_confidence = _clamp_unit(payload.decision_confidence)
+    elif trade_intents:
+        decision_confidence = _clamp_unit(
+            sum(intent.confidence for intent in trade_intents) / max(len(trade_intents), 1)
+        )
+    else:
+        decision_confidence = 0.15
+    rationale = payload.rationale
+    if not rationale:
+        rationale = (
+            "No high-conviction trade intents were returned; keep a defensive posture."
+            if not trade_intents
+            else "Decision payload was partially repaired with runtime defaults."
+        )
+    return TradeIntentSet(
+        as_of_date=payload.as_of_date or as_of_date,
+        market_view=payload.market_view or market_view,
+        cash_target=cash_target,
+        trade_intents=trade_intents,
+        rejected_symbols=payload.rejected_symbols,
+        portfolio_risks=payload.portfolio_risks,
+        decision_confidence=decision_confidence,
+        rationale=rationale,
+        provider_name=payload.provider_name,
+    )
 
 
 class ResearchAgent:
@@ -128,6 +188,9 @@ class DecisionAgent:
             "Return only JSON that matches the TradeIntentSet schema. "
             "Every trade intent must include target_weight, stop_loss_pct, take_profit_pct, "
             "time_stop_days, and evidence_count. Use higher cash when uncertainty is elevated. "
+            "Even when there are no trades, you must still return all top-level keys: "
+            "as_of_date, market_view, cash_target, trade_intents, rejected_symbols, "
+            "portfolio_risks, decision_confidence, rationale, provider_name. "
             "Output one JSON object only. Do not add markdown fences or prose outside JSON."
         )
         user_prompt = _json_block(
@@ -147,14 +210,41 @@ class DecisionAgent:
                     "single_json_object_only": True,
                     "no_markdown": True,
                     "allow_empty_trade_intents_when_no_edge": True,
+                    "required_top_level_keys": [
+                        "as_of_date",
+                        "market_view",
+                        "cash_target",
+                        "trade_intents",
+                        "rejected_symbols",
+                        "portfolio_risks",
+                        "decision_confidence",
+                        "rationale",
+                        "provider_name",
+                    ],
+                    "empty_trade_template": {
+                        "as_of_date": str(as_of_date),
+                        "market_view": market_view,
+                        "cash_target": 1.0,
+                        "trade_intents": [],
+                        "rejected_symbols": [],
+                        "portfolio_risks": [],
+                        "decision_confidence": 0.2,
+                        "rationale": "No high-conviction setup today.",
+                        "provider_name": "deepseek",
+                    },
                 },
             }
         )
         try:
-            decision, records = self.chain.generate(
+            raw_decision, records = self.chain.generate(
                 system_prompt,
                 user_prompt,
-                TradeIntentSet,
+                PartialTradeIntentSet,
+            )
+            decision = _finalize_trade_intent_set(
+                raw_decision,
+                as_of_date=as_of_date,
+                market_view=market_view,
             )
             decision.provider_name = next(
                 (record.provider_name for record in records if record.success),

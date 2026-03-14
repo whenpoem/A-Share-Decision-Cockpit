@@ -49,6 +49,22 @@ class FailingChain:
         )
 
 
+class PartialDecisionChain:
+    def generate(self, system_prompt: str, user_prompt: str, schema):
+        return schema.model_validate(
+            {
+                "trade_intents": [],
+                "provider_name": "deepseek",
+            }
+        ), [
+            LLMCallRecord(
+                provider_name="deepseek",
+                success=True,
+                detail="ok",
+            )
+        ]
+
+
 def test_extract_json_object_handles_markdown_wrapper() -> None:
     payload = "analysis first\n```json\n{\"a\":1,\"b\":\"ok\"}\n```\nextra"
     assert _extract_json_object(payload) == '{"a":1,"b":"ok"}'
@@ -109,3 +125,24 @@ def test_decision_agent_fallback_includes_failure_reason(tmp_path) -> None:
     assert result.call_records
     assert "deepseek schema validation failed" in result.payload.rationale
     assert result.payload.provider_name == "system-fallback"
+
+
+def test_decision_agent_repairs_partial_empty_payload(tmp_path) -> None:
+    settings = make_settings(tmp_path)
+    agent = DecisionAgent(settings, PartialDecisionChain())
+
+    result = agent.run(
+        as_of_date=datetime(2025, 12, 1),
+        market_view="neutral",
+        cards=[],
+        positions_payload=[],
+        priors_payload=[],
+        memory_payload={},
+    )
+
+    assert result.degrade_mode is False
+    assert result.payload.trade_intents == []
+    assert result.payload.cash_target == 1.0
+    assert result.payload.market_view == "neutral"
+    assert result.payload.provider_name == "deepseek"
+    assert result.payload.rationale
