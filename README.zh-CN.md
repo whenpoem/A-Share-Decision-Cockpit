@@ -2,7 +2,7 @@
 
 [English](README.md)
 
-这个仓库已经从旧的“概率研究项目”重建为一套本地 A 股决策工作台，核心流程参考 `AI-Trader`，但定位不是信号社区，而是单人本地研究和模拟盘：
+这个仓库已经从旧的“概率研究项目”重建为一套本地 A 股决策工作台，核心流程参考 `AI-Trader`，定位是单人本地研究和模拟盘：
 
 - `market -> text -> research -> decision -> risk -> simulation`
 - `FastAPI` 后端

@@ -11,7 +11,7 @@ This repository has been rebuilt from the old probability-research project into 
 - deterministic risk shell around LLM trade intents
 - daily A-share simulation with `T+1`, lot-size, limit-up/limit-down, fees, and stamp tax
 
-It is designed for local single-user research and paper trading, not for social signals or copy trading.
+It is designed for local single-user research and paper trading workflows.
 
 ## Current Status
 
