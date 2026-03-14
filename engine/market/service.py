@@ -209,7 +209,13 @@ class MarketService:
         watchlist: Optional[list[str]] = None,
     ) -> MarketSnapshot:
         end_value = end_date or datetime.utcnow().date().isoformat()
-        symbols = self.provider.list_symbols(self.settings.market_universe_size)
+        provider_name = type(self.provider).__name__
+        try:
+            symbols = self.provider.list_symbols(self.settings.market_universe_size)
+        except Exception as exc:
+            raise RuntimeError(
+                f"[market:{provider_name}] list_symbols failed for end_date={end_value}: {exc}"
+            ) from exc
         if watchlist:
             normalized = {symbol.zfill(6) for symbol in watchlist}
             symbols = [item for item in symbols if item["symbol"] in normalized]
@@ -220,12 +226,23 @@ class MarketService:
         financials: dict[str, FinancialSnapshot] = {}
         for meta in symbols:
             symbol = meta["symbol"]
-            frame = self.provider.fetch_price_history(symbol, start_date, end_value)
+            try:
+                frame = self.provider.fetch_price_history(symbol, start_date, end_value)
+            except Exception as exc:
+                raise RuntimeError(
+                    f"[market:{provider_name}] fetch_price_history failed for symbol={symbol}, "
+                    f"start_date={start_date}, end_date={end_value}: {exc}"
+                ) from exc
             frame = frame.sort_values("date").reset_index(drop=True)
             frame["name"] = meta["name"]
             frame["sector"] = meta["sector"]
             bars[symbol] = frame
-            financials[symbol] = self.provider.fetch_financial_snapshot(symbol)
+            try:
+                financials[symbol] = self.provider.fetch_financial_snapshot(symbol)
+            except Exception as exc:
+                raise RuntimeError(
+                    f"[market:{provider_name}] fetch_financial_snapshot failed for symbol={symbol}: {exc}"
+                ) from exc
             self.store.upsert_symbol(symbol, meta["name"], meta["sector"])
             self._save_frame(self.settings.market_storage / f"{symbol}.parquet", frame)
         priors, as_of_date = build_prior_signals(bars, financials)

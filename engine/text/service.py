@@ -337,9 +337,13 @@ class TextService:
         for symbol in sorted(focus_symbols):
             try:
                 events.extend(self.provider.fetch_events(symbol, as_of_date))
-            except Exception:
+            except Exception as exc:
                 if not self.settings.text_fallback_to_derived:
-                    raise
+                    provider_name = getattr(self.provider, "provider_name", type(self.provider).__name__)
+                    raise RuntimeError(
+                        f"[text:{provider_name}] fetch_events failed for symbol={symbol}, "
+                        f"as_of_date={as_of_date.isoformat()}: {exc}"
+                    ) from exc
         events.extend(self._build_derived_events(priors, financials, bars, focus_symbols))
         deduped = dedupe_events(events)
         self._write_events(deduped, as_of_date)
