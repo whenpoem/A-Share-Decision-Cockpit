@@ -1,25 +1,7 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 
-type DashboardSummary = {
-  run: null | { run_id: string; as_of_date: string; status: string; summary: any };
-  portfolio: { positions: any[]; gross_exposure: number; nav: number };
-  signals: any[];
-  risk: { traffic_light: string; flags: string[] };
-};
-
-type SignalsPayload = {
-  run: null | { run_id: string; as_of_date: string; status: string };
-  cards: any[];
-  decision: any;
-  risk: any;
-};
-
-type BacktestSummary = {
-  runs: number;
-  total_return: number;
-  max_drawdown: number;
-  equity_curve: Array<{ as_of_date: string; nav: number }>;
-};
+type Mode = "backtest" | "paper" | "live";
+type Tab = "control" | "backtest" | "paper" | "live" | "signals" | "memory" | "diagnostics";
 
 const API = "http://127.0.0.1:8000";
 
@@ -34,209 +16,540 @@ async function getJson<T>(path: string, init?: RequestInit): Promise<T> {
   return response.json();
 }
 
-function pct(value: number): string {
-  return `${(value * 100).toFixed(1)}%`;
+function fmtPct(value: number | undefined): string {
+  if (value === undefined || Number.isNaN(value)) {
+    return "--";
+  }
+  return `${(value * 100).toFixed(2)}%`;
 }
 
-export default function App() {
-  const [summary, setSummary] = useState<DashboardSummary | null>(null);
-  const [signals, setSignals] = useState<SignalsPayload | null>(null);
-  const [backtest, setBacktest] = useState<BacktestSummary | null>(null);
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+function fmtNum(value: number | undefined): string {
+  if (value === undefined || Number.isNaN(value)) {
+    return "--";
+  }
+  return value.toLocaleString(undefined, { maximumFractionDigits: 2 });
+}
 
-  const refresh = async () => {
+function App() {
+  const [mode, setMode] = useState<Mode>("paper");
+  const [tab, setTab] = useState<Tab>("control");
+  const [system, setSystem] = useState<any>(null);
+  const [modeStatus, setModeStatus] = useState<any>(null);
+  const [dashboard, setDashboard] = useState<any>(null);
+  const [signals, setSignals] = useState<any>(null);
+  const [memory, setMemory] = useState<any>(null);
+  const [diagnostics, setDiagnostics] = useState<any>(null);
+  const [backtestRuns, setBacktestRuns] = useState<any[]>([]);
+  const [selectedBacktest, setSelectedBacktest] = useState<any>(null);
+  const [paperQueue, setPaperQueue] = useState<any[]>([]);
+  const [liveQueue, setLiveQueue] = useState<any[]>([]);
+  const [error, setError] = useState<string | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [backtestForm, setBacktestForm] = useState({
+    start_date: "2025-01-01",
+    end_date: "2025-12-31",
+    initial_capital: "1000000",
+    watchlist: "",
+  });
+
+  const currentQueue = mode === "live" ? liveQueue : paperQueue;
+  const taskList = system?.tasks ?? [];
+  const latestTask = taskList[0];
+
+  const refresh = async (currentMode: Mode = mode) => {
     try {
       setError(null);
-      const [dashboard, todaySignals, simSummary] = await Promise.all([
-        getJson<DashboardSummary>("/api/dashboard/summary"),
-        getJson<SignalsPayload>("/api/signals/today"),
-        getJson<BacktestSummary>("/api/backtest/summary"),
+      const queueEndpoint = currentMode === "live" ? "/api/live/approval-queue" : "/api/paper/approval-queue";
+      const [
+        systemPayload,
+        modePayload,
+        dashboardPayload,
+        signalsPayload,
+        memoryPayload,
+        diagnosticsPayload,
+        backtestPayload,
+        queuePayload,
+      ] = await Promise.all([
+        getJson<any>("/api/status/system"),
+        getJson<any>(`/api/status/mode/${currentMode}`),
+        getJson<any>(`/api/dashboard/summary?mode=${currentMode}`),
+        getJson<any>(`/api/signals/today?mode=${currentMode}`),
+        getJson<any>(`/api/memory/${currentMode}`),
+        getJson<any>("/api/diagnostics"),
+        getJson<any>("/api/backtest/runs"),
+        getJson<any>(queueEndpoint),
       ]);
-      setSummary(dashboard);
-      setSignals(todaySignals);
-      setBacktest(simSummary);
+      setSystem(systemPayload);
+      setModeStatus(modePayload);
+      setDashboard(dashboardPayload);
+      setSignals(signalsPayload);
+      setMemory(memoryPayload);
+      setDiagnostics(diagnosticsPayload);
+      setBacktestRuns(backtestPayload.runs ?? []);
+      setPaperQueue(currentMode === "paper" ? queuePayload.tickets ?? [] : paperQueue);
+      setLiveQueue(currentMode === "live" ? queuePayload.tickets ?? [] : liveQueue);
+      if (!selectedBacktest && (backtestPayload.runs?.length ?? 0) > 0) {
+        setSelectedBacktest(backtestPayload.runs[0].summary);
+      }
     } catch (err) {
-      setError(err instanceof Error ? err.message : "加载失败");
+      setError(err instanceof Error ? err.message : "Failed to load cockpit.");
     }
   };
 
   useEffect(() => {
-    refresh();
+    refresh(mode);
+  }, [mode]);
+
+  useEffect(() => {
+    const timer = window.setInterval(() => refresh(mode), 4000);
+    return () => window.clearInterval(timer);
+  }, [mode]);
+
+  useEffect(() => {
+    const socket = new WebSocket("ws://127.0.0.1:8000/ws/status");
+    socket.onmessage = (event) => {
+      try {
+        setSystem(JSON.parse(event.data));
+      } catch {
+        return;
+      }
+    };
+    return () => socket.close();
   }, []);
 
-  const runDaily = async () => {
+  const submitAction = async (label: string, path: string, init?: RequestInit) => {
     try {
       setLoading(true);
       setError(null);
-      await getJson("/api/sim/run-daily", { method: "POST", body: JSON.stringify({}) });
-      await refresh();
+      await getJson(path, init);
+      await refresh(mode);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "运行失败");
+      setError(err instanceof Error ? `${label}: ${err.message}` : `${label} failed`);
     } finally {
       setLoading(false);
     }
   };
 
+  const submitBacktest = async () => {
+    await submitAction("Backtest", "/api/control/run-backtest", {
+      method: "POST",
+      body: JSON.stringify({
+        start_date: backtestForm.start_date,
+        end_date: backtestForm.end_date,
+        initial_capital: Number(backtestForm.initial_capital),
+        watchlist: backtestForm.watchlist
+          .split(",")
+          .map((item) => item.trim())
+          .filter(Boolean),
+      }),
+    });
+    setTab("backtest");
+  };
+
+  const approvalActions = useMemo(
+    () => ({
+      approve: async (ticketId: string) =>
+        submitAction(
+          "Approve",
+          `${mode === "live" ? "/api/live/approve" : "/api/paper/approve"}/${ticketId}`,
+          { method: "POST" },
+        ),
+      reject: async (ticketId: string) =>
+        submitAction(
+          "Reject",
+          `${mode === "live" ? "/api/live/reject" : "/api/paper/reject"}/${ticketId}`,
+          { method: "POST" },
+        ),
+    }),
+    [mode],
+  );
+
+  const pageTitle = {
+    control: "Control Center",
+    backtest: "Backtest",
+    paper: "Paper Trading",
+    live: "Live Trading",
+    signals: "Signals & Decisions",
+    memory: "Memory",
+    diagnostics: "Diagnostics",
+  }[tab];
+
   return (
-    <div className="app-shell">
-      <aside className="sidebar">
+    <div className="cockpit-shell">
+      <header className="topbar">
         <div>
-          <p className="eyebrow">AI-Trader Inspired</p>
-          <h1>A股决策驾驶舱</h1>
+          <p className="eyebrow">A-share AI workstation</p>
+          <h1>A-Share Decision Cockpit</h1>
           <p className="lede">
-            LLM 原始建议、硬风控裁决与日频模拟盘在一个本地工作台里串起来。
+            Three-mode research, decision, approval, memory, and execution control from one local console.
           </p>
         </div>
-        <div className="sidebar-card">
-          <button className="primary" onClick={runDaily} disabled={loading}>
-            {loading ? "正在运行..." : "运行今日流程"}
-          </button>
-          <button className="secondary" onClick={refresh}>
-            刷新面板
-          </button>
+        <div className="mode-switch">
+          {(["backtest", "paper", "live"] as Mode[]).map((item) => (
+            <button
+              key={item}
+              className={item === mode ? "mode-button active" : "mode-button"}
+              onClick={() => setMode(item)}
+            >
+              {item.toUpperCase()}
+            </button>
+          ))}
         </div>
-        <div className="sidebar-card">
-          <span className={`lamp lamp-${summary?.risk.traffic_light ?? "amber"}`} />
-          <div>
-            <strong>风控灯</strong>
-            <p>{summary?.risk.flags?.join(" / ") || "尚未运行"}</p>
-          </div>
-        </div>
-      </aside>
+      </header>
 
-      <main className="main-grid">
-        {error ? <div className="banner error">{error}</div> : null}
-        <section className="hero-card">
-          <div>
-            <p className="eyebrow">Decision Cockpit</p>
-            <h2>
-              {summary?.run ? `最新运行 ${summary.run.run_id}` : "还没有运行记录"}
-            </h2>
-            <p>
-              {summary?.run
-                ? `观察日 ${summary.run.as_of_date}，状态 ${summary.run.status}`
-                : "点击左侧按钮生成第一批研究卡、决策与模拟结果。"}
-            </p>
+      <div className="workspace">
+        <aside className="sidebar">
+          {(["control", "backtest", "paper", "live", "signals", "memory", "diagnostics"] as Tab[]).map((item) => (
+            <button
+              key={item}
+              className={item === tab ? "nav-button active" : "nav-button"}
+              onClick={() => setTab(item)}
+            >
+              {item}
+            </button>
+          ))}
+          <div className="sidebar-card">
+            <strong>Mode</strong>
+            <span>{mode.toUpperCase()}</span>
+            <strong>Status</strong>
+            <span>{modeStatus?.state?.status ?? "--"}</span>
+            <strong>Approvals</strong>
+            <span>{modeStatus?.state?.approval_count ?? 0}</span>
           </div>
-          <div className="hero-stats">
-            <div>
-              <span>组合净值</span>
-              <strong>{summary ? summary.portfolio.nav.toLocaleString() : "--"}</strong>
-            </div>
-            <div>
-              <span>总仓位</span>
-              <strong>{summary ? pct(summary.portfolio.gross_exposure) : "--"}</strong>
-            </div>
-            <div>
-              <span>模拟运行数</span>
-              <strong>{backtest?.runs ?? 0}</strong>
-            </div>
+          <div className="sidebar-card">
+            <strong>Latest Task</strong>
+            <span>{latestTask?.task_type ?? "none"}</span>
+            <span>{latestTask?.status ?? "--"}</span>
           </div>
-        </section>
+        </aside>
 
-        <section className="panel">
-          <div className="panel-head">
-            <h3>今日候选与研究卡</h3>
-            <span>{signals?.cards.length ?? 0} 只</span>
-          </div>
-          <div className="signal-list">
-            {(signals?.cards ?? []).slice(0, 8).map((card) => (
-              <article className="signal-card" key={card.symbol}>
-                <div className="signal-topline">
-                  <strong>{card.symbol}</strong>
-                  <span className={`tag tag-${card.stance}`}>{card.stance}</span>
-                  <span className="tag quality">{card.event_quality}</span>
-                </div>
-                <p>{card.summary}</p>
-                <div className="chip-row">
-                  {(card.drivers ?? []).slice(0, 3).map((item: string) => (
-                    <span className="chip" key={item}>
-                      {item}
-                    </span>
-                  ))}
-                </div>
-              </article>
-            ))}
-          </div>
-        </section>
-
-        <section className="panel">
-          <div className="panel-head">
-            <h3>LLM 原始建议 vs 风控后建议</h3>
-          </div>
-          <div className="decision-grid">
-            <div className="subpanel">
-              <h4>原始决策</h4>
-              <p className="subpanel-note">{signals?.decision?.rationale ?? "暂无"}</p>
-              {(signals?.decision?.trade_intents ?? []).slice(0, 8).map((intent: any) => (
-                <div className="intent-row" key={`${intent.symbol}-${intent.action}`}>
-                  <span>{intent.symbol}</span>
-                  <strong>{intent.action}</strong>
-                  <span>{pct(intent.target_weight)}</span>
-                </div>
-              ))}
+        <main className="content">
+          <section className="hero-card">
+            <div>
+              <p className="eyebrow">{pageTitle}</p>
+              <h2>{dashboard?.run?.run_id ?? "No run yet"}</h2>
+              <p>
+                {dashboard?.run
+                  ? `As of ${dashboard.run.as_of_date} · ${dashboard.run.status}`
+                  : "Start a paper cycle, connect live mode, or launch a walk-forward backtest."}
+              </p>
             </div>
-            <div className="subpanel">
-              <h4>风控裁决</h4>
-              {["approved", "clipped", "delayed", "rejected"].map((bucket) => (
-                <div key={bucket} className="risk-bucket">
-                  <div className="risk-bucket-title">{bucket}</div>
-                  {((signals?.risk?.[bucket] ?? []) as any[]).slice(0, 6).map((item) => (
-                    <div className="intent-row" key={`${bucket}-${item.symbol}`}>
-                      <span>{item.symbol}</span>
-                      <strong>{pct(item.approved_weight)}</strong>
-                      <span>{(item.risk_flags ?? []).join(", ") || "ok"}</span>
+            <div className="hero-stats">
+              <div>
+                <span>NAV</span>
+                <strong>{fmtNum(dashboard?.portfolio?.nav)}</strong>
+              </div>
+              <div>
+                <span>Cash</span>
+                <strong>{fmtNum(dashboard?.portfolio?.cash)}</strong>
+              </div>
+              <div>
+                <span>Exposure</span>
+                <strong>{fmtPct(dashboard?.portfolio?.gross_exposure)}</strong>
+              </div>
+            </div>
+          </section>
+
+          {error ? <div className="banner error">{error}</div> : null}
+
+          {tab === "control" ? (
+            <div className="grid two">
+              <section className="panel">
+                <div className="panel-head">
+                  <h3>Run Controls</h3>
+                </div>
+                <div className="action-grid">
+                  <button onClick={() => submitAction("Paper cycle", "/api/control/run-paper-cycle", { method: "POST", body: JSON.stringify({}) })} disabled={loading}>
+                    Run Paper Cycle
+                  </button>
+                  <button onClick={() => submitAction("Live cycle", "/api/control/run-live-cycle", { method: "POST", body: JSON.stringify({}) })} disabled={loading}>
+                    Run Live Cycle
+                  </button>
+                  <button onClick={() => submitAction("Start live", "/api/control/start-live-session", { method: "POST" })} disabled={loading}>
+                    Start Live Session
+                  </button>
+                  <button onClick={() => submitAction("Stop live", "/api/control/stop-live-session", { method: "POST" })} disabled={loading}>
+                    Stop Live Session
+                  </button>
+                  <button onClick={() => submitAction("Rebuild memory", "/api/control/rebuild-memory", { method: "POST", body: JSON.stringify({ mode }) })} disabled={loading}>
+                    Rebuild Memory
+                  </button>
+                  <button onClick={() => refresh(mode)} disabled={loading}>
+                    Refresh State
+                  </button>
+                </div>
+              </section>
+
+              <section className="panel">
+                <div className="panel-head">
+                  <h3>Task Feed</h3>
+                </div>
+                <div className="list">
+                  {taskList.map((task: any) => (
+                    <div key={task.task_id} className="list-row">
+                      <div>
+                        <strong>{task.task_type}</strong>
+                        <p>{task.mode ?? "system"}</p>
+                      </div>
+                      <div>
+                        <span>{task.status}</span>
+                        <p>{fmtPct(task.progress)}</p>
+                      </div>
                     </div>
                   ))}
                 </div>
-              ))}
+              </section>
             </div>
-          </div>
-        </section>
+          ) : null}
 
-        <section className="panel">
-          <div className="panel-head">
-            <h3>组合与风险</h3>
-            <span>{summary?.portfolio.positions.length ?? 0} 个持仓</span>
-          </div>
-          <div className="table-like">
-            <div className="table-head">
-              <span>标的</span>
-              <span>市值</span>
-              <span>成本</span>
-              <span>最新价</span>
+          {tab === "backtest" ? (
+            <div className="grid two">
+              <section className="panel">
+                <div className="panel-head">
+                  <h3>Backtest Setup</h3>
+                </div>
+                <div className="form-grid">
+                  <label>
+                    Start
+                    <input type="date" value={backtestForm.start_date} onChange={(event) => setBacktestForm({ ...backtestForm, start_date: event.target.value })} />
+                  </label>
+                  <label>
+                    End
+                    <input type="date" value={backtestForm.end_date} onChange={(event) => setBacktestForm({ ...backtestForm, end_date: event.target.value })} />
+                  </label>
+                  <label>
+                    Initial Capital
+                    <input value={backtestForm.initial_capital} onChange={(event) => setBacktestForm({ ...backtestForm, initial_capital: event.target.value })} />
+                  </label>
+                  <label className="full">
+                    Watchlist
+                    <input value={backtestForm.watchlist} onChange={(event) => setBacktestForm({ ...backtestForm, watchlist: event.target.value })} placeholder="000001,600519,300750" />
+                  </label>
+                </div>
+                <button onClick={submitBacktest} disabled={loading}>
+                  Run Walk-forward Backtest
+                </button>
+              </section>
+
+              <section className="panel">
+                <div className="panel-head">
+                  <h3>Backtest Runs</h3>
+                </div>
+                <div className="list">
+                  {backtestRuns.map((run: any) => (
+                    <button key={run.run_id} className="list-row selectable" onClick={() => setSelectedBacktest(run.summary)}>
+                      <div>
+                        <strong>{run.run_id}</strong>
+                        <p>{run.start_date} → {run.end_date}</p>
+                      </div>
+                      <div>
+                        <span>{run.status}</span>
+                        <p>{fmtPct(run.summary?.metrics?.total_return)}</p>
+                      </div>
+                    </button>
+                  ))}
+                </div>
+              </section>
+
+              <section className="panel span-two">
+                <div className="panel-head">
+                  <h3>Backtest Result</h3>
+                </div>
+                {selectedBacktest ? (
+                  <>
+                    <div className="metric-grid">
+                      {Object.entries(selectedBacktest.metrics ?? {}).map(([key, value]) => (
+                        <div key={key} className="metric-card">
+                          <span>{key}</span>
+                          <strong>{typeof value === "number" ? fmtPct(value) : String(value)}</strong>
+                        </div>
+                      ))}
+                    </div>
+                    <div className="timeline">
+                      {(selectedBacktest.equity_curve ?? []).slice(-20).map((point: any) => (
+                        <div key={point.as_of_date} className="timeline-row">
+                          <span>{point.as_of_date}</span>
+                          <strong>{fmtNum(point.nav)}</strong>
+                        </div>
+                      ))}
+                    </div>
+                  </>
+                ) : (
+                  <p className="muted">No backtest selected.</p>
+                )}
+              </section>
             </div>
-            {(summary?.portfolio.positions ?? []).map((position) => (
-              <div className="table-row" key={position.symbol}>
-                <span>{position.symbol}</span>
-                <span>{Number(position.market_value).toFixed(0)}</span>
-                <span>{Number(position.avg_cost).toFixed(2)}</span>
-                <span>{Number(position.last_price).toFixed(2)}</span>
-              </div>
-            ))}
-          </div>
-        </section>
+          ) : null}
 
-        <section className="panel">
-          <div className="panel-head">
-            <h3>Simulation</h3>
-            <span>
-              收益 {backtest ? pct(backtest.total_return) : "--"} / 回撤{" "}
-              {backtest ? pct(backtest.max_drawdown) : "--"}
-            </span>
-          </div>
-          <div className="equity-list">
-            {(backtest?.equity_curve ?? []).slice(-8).map((point) => (
-              <div className="intent-row" key={point.as_of_date}>
-                <span>{point.as_of_date}</span>
-                <strong>{point.nav.toFixed(0)}</strong>
+          {tab === "paper" ? (
+            <section className="panel">
+              <div className="panel-head">
+                <h3>Paper Trading Queue</h3>
               </div>
-            ))}
-          </div>
-        </section>
-      </main>
+              <ApprovalQueue tickets={paperQueue} onApprove={approvalActions.approve} onReject={approvalActions.reject} />
+            </section>
+          ) : null}
+
+          {tab === "live" ? (
+            <div className="grid two">
+              <section className="panel">
+                <div className="panel-head">
+                  <h3>Broker Account</h3>
+                </div>
+                <div className="metric-grid">
+                  <div className="metric-card">
+                    <span>Provider</span>
+                    <strong>{system?.live_account?.provider ?? "--"}</strong>
+                  </div>
+                  <div className="metric-card">
+                    <span>Connected</span>
+                    <strong>{String(system?.live_account?.connected ?? false)}</strong>
+                  </div>
+                  <div className="metric-card">
+                    <span>Cash</span>
+                    <strong>{fmtNum(system?.live_account?.cash)}</strong>
+                  </div>
+                  <div className="metric-card">
+                    <span>Equity</span>
+                    <strong>{fmtNum(system?.live_account?.equity)}</strong>
+                  </div>
+                </div>
+              </section>
+              <section className="panel">
+                <div className="panel-head">
+                  <h3>Live Approval Queue</h3>
+                </div>
+                <ApprovalQueue tickets={liveQueue} onApprove={approvalActions.approve} onReject={approvalActions.reject} />
+              </section>
+            </div>
+          ) : null}
+
+          {tab === "signals" ? (
+            <div className="grid two">
+              <section className="panel">
+                <div className="panel-head">
+                  <h3>Research Cards</h3>
+                </div>
+                <div className="list">
+                  {(signals?.cards ?? []).map((card: any) => (
+                    <div key={card.symbol} className="signal-card">
+                      <div className="signal-top">
+                        <strong>{card.symbol}</strong>
+                        <span className={`tag ${card.stance}`}>{card.stance}</span>
+                        <span className="tag muted-tag">{card.event_quality}</span>
+                      </div>
+                      <p>{card.summary}</p>
+                      <div className="chip-row">
+                        {(card.drivers ?? []).slice(0, 4).map((item: string) => (
+                          <span key={item} className="chip">{item}</span>
+                        ))}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </section>
+              <section className="panel">
+                <div className="panel-head">
+                  <h3>Decision & Risk</h3>
+                </div>
+                <pre className="code-block">{JSON.stringify(signals?.decision ?? {}, null, 2)}</pre>
+                <pre className="code-block">{JSON.stringify(signals?.risk ?? {}, null, 2)}</pre>
+              </section>
+            </div>
+          ) : null}
+
+          {tab === "memory" ? (
+            <div className="grid two">
+              <section className="panel">
+                <div className="panel-head">
+                  <h3>Position Memory</h3>
+                </div>
+                <div className="list">
+                  {(memory?.positions ?? []).map((item: any) => (
+                    <div key={item.symbol} className="list-row">
+                      <div>
+                        <strong>{item.symbol}</strong>
+                        <p>{item.current_thesis || item.last_research_summary || "No thesis yet"}</p>
+                      </div>
+                      <div>
+                        <span>{item.last_decision_action ?? "hold"}</span>
+                        <p>{item.holding_days ?? 0} days</p>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </section>
+              <section className="panel">
+                <div className="panel-head">
+                  <h3>Decision Journal</h3>
+                </div>
+                <div className="timeline">
+                  {(memory?.journal ?? []).slice(0, 30).map((entry: any) => (
+                    <div key={entry.id} className="timeline-row">
+                      <span>{entry.as_of_date}</span>
+                      <strong>{entry.symbol}</strong>
+                      <span>{entry.stage}</span>
+                    </div>
+                  ))}
+                </div>
+              </section>
+            </div>
+          ) : null}
+
+          {tab === "diagnostics" ? (
+            <div className="grid two">
+              <section className="panel">
+                <div className="panel-head">
+                  <h3>Mode State</h3>
+                </div>
+                <pre className="code-block">{JSON.stringify(system?.modes ?? [], null, 2)}</pre>
+              </section>
+              <section className="panel">
+                <div className="panel-head">
+                  <h3>Diagnostics Feed</h3>
+                </div>
+                <pre className="code-block">{JSON.stringify(diagnostics ?? {}, null, 2)}</pre>
+              </section>
+            </div>
+          ) : null}
+        </main>
+      </div>
     </div>
   );
 }
+
+function ApprovalQueue({
+  tickets,
+  onApprove,
+  onReject,
+}: {
+  tickets: any[];
+  onApprove: (ticketId: string) => Promise<void>;
+  onReject: (ticketId: string) => Promise<void>;
+}) {
+  if (!tickets.length) {
+    return <p className="muted">No pending approvals.</p>;
+  }
+  return (
+    <div className="list">
+      {tickets.map((ticket) => (
+        <div key={ticket.ticket_id} className="approval-card">
+          <div>
+            <strong>{ticket.symbol}</strong>
+            <p>{ticket.side} · target {fmtPct(ticket.target_weight)}</p>
+            <p>{ticket.reason || "No rationale recorded."}</p>
+          </div>
+          <div className="approval-actions">
+            <button onClick={() => onApprove(ticket.ticket_id)}>Approve</button>
+            <button className="secondary" onClick={() => onReject(ticket.ticket_id)}>
+              Reject
+            </button>
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+export default App;
 

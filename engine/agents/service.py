@@ -3,13 +3,14 @@ from __future__ import annotations
 import json
 from dataclasses import dataclass
 from datetime import datetime
+from typing import Any
 
 from engine.agents.providers import LLMUnavailableError, ProviderChain
 from engine.config import Settings
 from engine.types import ResearchCard, SymbolEventPack, TradeIntent, TradeIntentSet
 
 
-def _json_block(payload: dict) -> str:
+def _json_block(payload: dict[str, Any]) -> str:
     return json.dumps(payload, ensure_ascii=False, indent=2, default=str)
 
 
@@ -27,25 +28,42 @@ class ResearchAgent:
 
     def run(self, pack: SymbolEventPack) -> AgentResult:
         system_prompt = (
-            "你是A股研究员。只能根据给定材料输出 JSON，不要输出自然语言解释。"
-            "如果证据不足，要明确标成 weak 和 neutral。"
+            "You are an A-share research analyst. "
+            "Read price priors, text events, financials, position state, and memory context. "
+            "Return only JSON that matches the ResearchCard schema. "
+            "If evidence is weak or conflicting, use stance=neutral and event_quality=weak or mixed."
         )
         user_prompt = _json_block(
             {
                 "symbol": pack.symbol,
                 "market_regime": pack.market_regime,
                 "prior": pack.prior.model_dump(mode="json"),
-                "financial_snapshot": pack.financial_snapshot.model_dump(mode="json")
-                if pack.financial_snapshot
-                else None,
+                "financial_snapshot": (
+                    pack.financial_snapshot.model_dump(mode="json")
+                    if pack.financial_snapshot
+                    else None
+                ),
                 "events": [event.model_dump(mode="json") for event in pack.events],
                 "position": pack.position.model_dump(mode="json") if pack.position else None,
+                "memory_context": pack.memory_context,
+                "output_rules": {
+                    "require_json_only": True,
+                    "confidence_range": [0.0, 1.0],
+                    "max_evidence_items": 6,
+                },
             }
         )
         try:
             card, records = self.chain.generate(system_prompt, user_prompt, ResearchCard)
-            card.provider_name = next((record.provider_name for record in records if record.success), "system")
-            return AgentResult(payload=card, degrade_mode=False, call_records=[record.__dict__ for record in records])
+            card.provider_name = next(
+                (record.provider_name for record in records if record.success),
+                "system",
+            )
+            return AgentResult(
+                payload=card,
+                degrade_mode=False,
+                call_records=[record.__dict__ for record in records],
+            )
         except LLMUnavailableError as exc:
             fallback_card = ResearchCard(
                 symbol=pack.symbol,
@@ -54,9 +72,9 @@ class ResearchAgent:
                 summary=f"LLM unavailable: {exc}",
                 evidence=[event.title for event in pack.events[:2]],
                 event_quality="weak",
-                drivers=["未能完成结构化研究，禁止新增仓位"],
+                drivers=["No structured text research was produced, so new entries stay blocked."],
                 risks=["LLM unavailable"],
-                invalidators=["等待下一次成功研究"],
+                invalidators=["Re-run research when an LLM provider is available."],
                 holding_horizon_days=5,
                 suggested_action_bias="hold" if pack.position else "avoid",
                 provider_name="system-fallback",
@@ -74,13 +92,16 @@ class DecisionAgent:
         as_of_date: datetime,
         market_view: str,
         cards: list[ResearchCard],
-        positions_payload: list[dict],
-        priors_payload: list[dict],
+        positions_payload: list[dict[str, Any]],
+        priors_payload: list[dict[str, Any]],
+        memory_payload: dict[str, Any],
     ) -> AgentResult:
         system_prompt = (
-            "你是A股组合经理。只能输出 JSON。"
-            "可以建议买卖，但必须给出 target_weight、stop_loss_pct、time_stop_days 和 evidence_count。"
-            "如果证据不足或市场风险过大，优先提高现金比例。"
+            "You are an A-share portfolio manager. "
+            "Read research cards, existing positions, priors, and portfolio memory. "
+            "Return only JSON that matches the TradeIntentSet schema. "
+            "Every trade intent must include target_weight, stop_loss_pct, take_profit_pct, "
+            "time_stop_days, and evidence_count. Use higher cash when uncertainty is elevated."
         )
         user_prompt = _json_block(
             {
@@ -89,6 +110,7 @@ class DecisionAgent:
                 "cards": [card.model_dump(mode="json") for card in cards],
                 "positions": positions_payload,
                 "priors": priors_payload,
+                "memory": memory_payload,
                 "constraints": {
                     "max_position_weight": self.settings.max_position_weight,
                     "max_gross_exposure": self.settings.max_gross_exposure,
@@ -97,9 +119,20 @@ class DecisionAgent:
             }
         )
         try:
-            decision, records = self.chain.generate(system_prompt, user_prompt, TradeIntentSet)
-            decision.provider_name = next((record.provider_name for record in records if record.success), "system")
-            return AgentResult(payload=decision, degrade_mode=False, call_records=[record.__dict__ for record in records])
+            decision, records = self.chain.generate(
+                system_prompt,
+                user_prompt,
+                TradeIntentSet,
+            )
+            decision.provider_name = next(
+                (record.provider_name for record in records if record.success),
+                "system",
+            )
+            return AgentResult(
+                payload=decision,
+                degrade_mode=False,
+                call_records=[record.__dict__ for record in records],
+            )
         except LLMUnavailableError:
             fallback = TradeIntentSet(
                 as_of_date=as_of_date,
@@ -109,7 +142,10 @@ class DecisionAgent:
                     TradeIntent(
                         symbol=position["symbol"],
                         action="hold",
-                        target_weight=min(position.get("weight", 0.0), self.settings.max_position_weight),
+                        target_weight=min(
+                            position.get("weight", 0.0),
+                            self.settings.max_position_weight,
+                        ),
                         max_weight=self.settings.max_position_weight,
                         confidence=0.0,
                         thesis="LLM unavailable, risk-only mode",
@@ -124,7 +160,7 @@ class DecisionAgent:
                 rejected_symbols=[],
                 portfolio_risks=["LLM unavailable"],
                 decision_confidence=0.0,
-                rationale="Both DeepSeek and Qwen failed. Disable new entries and keep risk-only mode.",
+                rationale="Both LLM providers failed. Keep cash high and disable new entries.",
                 provider_name="system-fallback",
             )
             return AgentResult(payload=fallback, degrade_mode=True, call_records=[])

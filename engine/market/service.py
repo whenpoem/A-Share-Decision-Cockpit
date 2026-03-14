@@ -202,9 +202,20 @@ class MarketService:
                 raise
             return SampleMarketProvider(self.settings.default_watchlist)
 
-    def refresh_market(self, start_date: str = "2023-01-01", end_date: Optional[str] = None) -> MarketSnapshot:
+    def refresh_market(
+        self,
+        start_date: str = "2023-01-01",
+        end_date: Optional[str] = None,
+        watchlist: Optional[list[str]] = None,
+    ) -> MarketSnapshot:
         end_value = end_date or datetime.utcnow().date().isoformat()
         symbols = self.provider.list_symbols(self.settings.market_universe_size)
+        if watchlist:
+            normalized = {symbol.zfill(6) for symbol in watchlist}
+            symbols = [item for item in symbols if item["symbol"] in normalized]
+            existing = {item["symbol"] for item in symbols}
+            for symbol in sorted(normalized - existing):
+                symbols.append({"symbol": symbol, "name": symbol, "sector": "Unknown"})
         bars: dict[str, pd.DataFrame] = {}
         financials: dict[str, FinancialSnapshot] = {}
         for meta in symbols:
@@ -266,7 +277,7 @@ def build_prior_signals(
             }
         )
     feature_frame = pd.DataFrame(feature_rows)
-    regime = classify_market_regime(np.nanmean(market_returns), np.nanmean(market_vols))
+    regime = classify_market_regime(_safe_mean(market_returns), _safe_mean(market_vols))
     for column in ["ret_5", "ret_20", "vol_20", "amount_20", "drawdown_20", "breakout_ratio", "roe", "net_profit_yoy", "revenue_yoy", "debt_ratio"]:
         feature_frame[f"{column}_z"] = _zscore(feature_frame[column])
     priors = []
@@ -337,3 +348,10 @@ def _zscore(series: pd.Series) -> pd.Series:
     if std == 0 or np.isnan(std):
         return pd.Series(np.zeros(len(series)), index=series.index)
     return (series - series.mean()) / std
+
+
+def _safe_mean(values: list[float]) -> float:
+    array = np.asarray(values, dtype=float)
+    if array.size == 0 or np.isnan(array).all():
+        return 0.0
+    return float(np.nanmean(array))

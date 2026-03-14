@@ -2,19 +2,31 @@ from __future__ import annotations
 
 from typing import Protocol
 
-from engine.types import FillEvent, OrderRequest, PositionState
+from engine.types import BrokerAccountSnapshot, BrokerOrderSnapshot, FillEvent, OrderRequest, PositionState
 
 
 class ExecutionAdapter(Protocol):
-    def prepare_orders(self, trade_intents) -> list[OrderRequest]:
+    def connect(self) -> BrokerAccountSnapshot:
         ...
 
-    def submit_orders(self, order_requests: list[OrderRequest]) -> list[FillEvent]:
+    def disconnect(self) -> None:
         ...
 
-    def sync_positions(self) -> dict[str, PositionState]:
+    def account_snapshot(self) -> BrokerAccountSnapshot:
         ...
 
-    def sync_fills(self) -> list[FillEvent]:
+    def positions_snapshot(self) -> dict[str, PositionState]:
+        ...
+
+    def open_orders(self) -> list[BrokerOrderSnapshot]:
+        ...
+
+    def submit_order(self, order_request: OrderRequest) -> BrokerOrderSnapshot:
+        ...
+
+    def cancel_order(self, broker_order_id: str) -> BrokerOrderSnapshot | None:
+        ...
+
+    def fills_since(self, cursor: str = "") -> list[FillEvent]:
         ...
 

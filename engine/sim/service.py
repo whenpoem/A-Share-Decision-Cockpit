@@ -13,6 +13,27 @@ class SimulationService:
     def __init__(self, settings: Settings) -> None:
         self.settings = settings
 
+    def mark_to_market(
+        self,
+        as_of_date: datetime,
+        bars: dict[str, pd.DataFrame],
+        positions: dict[str, PositionState],
+    ) -> dict[str, PositionState]:
+        updated = {symbol: position.model_copy(deep=True) for symbol, position in positions.items()}
+        for symbol, position in updated.items():
+            frame = bars.get(symbol)
+            if frame is None or frame.empty:
+                continue
+            eligible = frame[frame["date"] <= pd.Timestamp(as_of_date)]
+            if eligible.empty:
+                continue
+            latest = eligible.iloc[-1]
+            price = float(latest["close"])
+            position.last_price = price
+            position.market_value = position.quantity * price
+            position.peak_price = max(position.peak_price, price)
+        return updated
+
     def prepare_orders(
         self,
         review: RiskReview,
@@ -53,7 +74,7 @@ class SimulationService:
         priors: dict[str, PriorSignal],
         starting_cash: float,
     ) -> tuple[list[FillEvent], dict[str, PositionState], float]:
-        updated_positions = {symbol: position.model_copy(deep=True) for symbol, position in positions.items()}
+        updated_positions = self.mark_to_market(as_of_date, bars, positions)
         fills: list[FillEvent] = []
         cash_balance = starting_cash
         for order in orders:
@@ -86,6 +107,7 @@ class SimulationService:
                 cash_balance += (fill.price * fill.quantity) - fill.fees
                 if position is None:
                     continue
+                fill.realized_pnl = ((fill.price - position.avg_cost) * fill.quantity) - fill.fees
                 new_qty = max(0, position.quantity - fill.quantity)
                 if new_qty == 0:
                     updated_positions.pop(order.symbol, None)

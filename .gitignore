@@ -16,3 +16,7 @@ storage/text/*
 storage/artifacts/*
 !storage/artifacts/.gitkeep
 storage/state.db
+storage/backtest/
+storage/paper/
+storage/live/
+storage/system.db

@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import os
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 
 
@@ -23,6 +23,16 @@ class LLMProviderConfig:
 
 
 @dataclass
+class LiveBrokerConfig:
+    provider: str
+    enabled: bool = False
+    account_id: str = ""
+    terminal_path: str = ""
+    terminal_user: str = ""
+    terminal_password: str = ""
+
+
+@dataclass
 class Settings:
     project_root: Path
     storage_root: Path
@@ -35,6 +45,10 @@ class Settings:
     db_path: Path
     primary_provider: LLMProviderConfig
     fallback_provider: LLMProviderConfig
+    live_broker: LiveBrokerConfig
+    system_db_path: Path
+    system_storage_root: Path
+    current_mode: str = "paper"
     market_provider: str = "akshare"
     text_provider: str = "akshare"
     text_lookback_days: int = 30
@@ -82,7 +96,8 @@ class Settings:
     @classmethod
     def load(cls, project_root: Path | None = None) -> "Settings":
         root = (project_root or Path(__file__).resolve().parents[1]).resolve()
-        storage_root = Path(os.getenv("ASHARE_STORAGE_ROOT", root / "storage")).resolve()
+        system_storage_root = Path(os.getenv("ASHARE_STORAGE_ROOT", root / "storage")).resolve()
+        storage_root = system_storage_root
         market_storage = storage_root / "market"
         text_storage = storage_root / "text"
         disclosure_storage = text_storage / "disclosures"
@@ -102,6 +117,7 @@ class Settings:
         return cls(
             project_root=root,
             storage_root=storage_root,
+            system_storage_root=system_storage_root,
             market_storage=market_storage,
             text_storage=text_storage,
             disclosure_storage=disclosure_storage,
@@ -109,6 +125,9 @@ class Settings:
             disclosure_text_storage=disclosure_text_storage,
             artifact_storage=artifact_storage,
             db_path=Path(os.getenv("ASHARE_DB_PATH", storage_root / "state.db")).resolve(),
+            system_db_path=Path(
+                os.getenv("ASHARE_SYSTEM_DB_PATH", system_storage_root / "state.db")
+            ).resolve(),
             primary_provider=LLMProviderConfig(
                 api_base=os.getenv("DEEPSEEK_API_BASE", "https://api.deepseek.com/v1"),
                 api_key=os.getenv("DEEPSEEK_API_KEY", ""),
@@ -127,6 +146,14 @@ class Settings:
                 timeout_seconds=float(os.getenv("QWEN_TIMEOUT_SECONDS", "25")),
                 temperature=float(os.getenv("QWEN_TEMPERATURE", "0.1")),
                 max_tokens=int(os.getenv("QWEN_MAX_TOKENS", "1200")),
+            ),
+            live_broker=LiveBrokerConfig(
+                provider=os.getenv("ASHARE_LIVE_BROKER", "qmt_ready"),
+                enabled=_bool_env("ASHARE_LIVE_ENABLED", False),
+                account_id=os.getenv("ASHARE_LIVE_ACCOUNT_ID", ""),
+                terminal_path=os.getenv("ASHARE_QMT_TERMINAL_PATH", ""),
+                terminal_user=os.getenv("ASHARE_QMT_USER", ""),
+                terminal_password=os.getenv("ASHARE_QMT_PASSWORD", ""),
             ),
             market_provider=os.getenv("ASHARE_MARKET_PROVIDER", "akshare"),
             text_provider=os.getenv("ASHARE_TEXT_PROVIDER", "akshare"),
@@ -173,4 +200,35 @@ class Settings:
                 ).split(",")
                 if symbol.strip()
             ],
+        )
+
+    def for_mode(self, mode: str) -> "Settings":
+        mode_root = (self.system_storage_root / mode).resolve()
+        market_storage = mode_root / "market"
+        text_storage = mode_root / "text"
+        disclosure_storage = text_storage / "disclosures"
+        disclosure_pdf_storage = disclosure_storage / "pdf"
+        disclosure_text_storage = disclosure_storage / "text"
+        artifact_storage = mode_root / "artifacts"
+        for path in (
+            mode_root,
+            market_storage,
+            text_storage,
+            disclosure_storage,
+            disclosure_pdf_storage,
+            disclosure_text_storage,
+            artifact_storage,
+        ):
+            path.mkdir(parents=True, exist_ok=True)
+        return replace(
+            self,
+            current_mode=mode,
+            storage_root=mode_root,
+            market_storage=market_storage,
+            text_storage=text_storage,
+            disclosure_storage=disclosure_storage,
+            disclosure_pdf_storage=disclosure_pdf_storage,
+            disclosure_text_storage=disclosure_text_storage,
+            artifact_storage=artifact_storage,
+            db_path=mode_root / "state.db",
         )
