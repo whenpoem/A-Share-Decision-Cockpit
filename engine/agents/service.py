@@ -5,7 +5,7 @@ from dataclasses import dataclass
 from datetime import datetime
 from typing import Any
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 from engine.agents.providers import LLMUnavailableError, ProviderChain
 from engine.config import Settings
@@ -49,6 +49,29 @@ class PartialTradeIntentSet(BaseModel):
     decision_confidence: float | None = None
     rationale: str | None = None
     provider_name: str = "system"
+
+    @field_validator("rejected_symbols", mode="before")
+    @classmethod
+    def _coerce_rejected_symbols(cls, value: Any) -> list[str]:
+        if value is None:
+            return []
+        if not isinstance(value, list):
+            value = [value]
+        normalized: list[str] = []
+        for item in value:
+            if isinstance(item, str):
+                normalized.append(item.zfill(6) if item.isdigit() else item)
+                continue
+            if isinstance(item, int):
+                normalized.append(str(item).zfill(6))
+                continue
+            if isinstance(item, dict):
+                symbol = item.get("symbol") or item.get("code")
+                if symbol is None:
+                    continue
+                symbol_text = str(symbol)
+                normalized.append(symbol_text.zfill(6) if symbol_text.isdigit() else symbol_text)
+        return normalized
 
 
 def _clamp_unit(value: float) -> float:

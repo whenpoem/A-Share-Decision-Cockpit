@@ -17,7 +17,7 @@ class LLMProviderConfig:
     api_base: str
     api_key: str
     model_name: str
-    timeout_seconds: float = 25.0
+    timeout_seconds: float = 45.0
     temperature: float = 0.1
     max_tokens: int = 1200
 
@@ -131,7 +131,7 @@ class Settings:
                 api_base=os.getenv("DEEPSEEK_API_BASE", "https://api.deepseek.com/v1"),
                 api_key=os.getenv("DEEPSEEK_API_KEY", ""),
                 model_name=os.getenv("DEEPSEEK_MODEL", "deepseek-chat"),
-                timeout_seconds=float(os.getenv("DEEPSEEK_TIMEOUT_SECONDS", "25")),
+                timeout_seconds=float(os.getenv("DEEPSEEK_TIMEOUT_SECONDS", "45")),
                 temperature=float(os.getenv("DEEPSEEK_TEMPERATURE", "0.1")),
                 max_tokens=int(os.getenv("DEEPSEEK_MAX_TOKENS", "1200")),
             ),
