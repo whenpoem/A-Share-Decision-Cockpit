@@ -61,7 +61,8 @@ button:disabled {
 .panel,
 .signal-card,
 .approval-card,
-.metric-card {
+.metric-card,
+.chart-card {
   background: var(--paper);
   border: 1px solid var(--line);
   border-radius: 22px;
@@ -139,6 +140,11 @@ button:disabled {
 }
 
 .content {
+  display: grid;
+  gap: 18px;
+}
+
+.section-stack {
   display: grid;
   gap: 18px;
 }
@@ -241,10 +247,29 @@ input {
   background: #fffdf8;
 }
 
+.selectable.active {
+  border-color: rgba(185, 95, 45, 0.35);
+  background: linear-gradient(135deg, rgba(239, 215, 198, 0.65), #fffdf8);
+}
+
+.list-meta {
+  display: grid;
+  gap: 4px;
+  justify-items: end;
+  text-align: right;
+}
+
+.signal-card {
+  padding: 16px;
+  display: grid;
+  gap: 12px;
+}
+
 .signal-top {
   display: flex;
   gap: 8px;
   align-items: center;
+  flex-wrap: wrap;
 }
 
 .tag {
@@ -276,10 +301,38 @@ input {
   font-size: 0.78rem;
 }
 
+.note-list {
+  display: grid;
+  gap: 6px;
+}
+
 .metric-card {
   padding: 14px;
   display: grid;
   gap: 8px;
+}
+
+.mini-grid,
+.kv-grid {
+  display: grid;
+  gap: 14px;
+}
+
+.mini-grid {
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+}
+
+.kv-grid {
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  margin-bottom: 14px;
+}
+
+.kv-grid > div {
+  padding: 14px;
+  border-radius: 16px;
+  background: #f6eadc;
+  display: grid;
+  gap: 6px;
 }
 
 .metric-card span,
@@ -296,6 +349,56 @@ input {
 .approval-actions {
   align-items: center;
   justify-content: flex-end;
+}
+
+.chart-card {
+  padding: 16px;
+  display: grid;
+  gap: 10px;
+}
+
+.chart-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.chart-header h4 {
+  margin: 0;
+}
+
+.chart-header p {
+  margin: 6px 0 0;
+  color: var(--muted);
+  font-size: 0.9rem;
+}
+
+.chart {
+  width: 100%;
+  min-height: 220px;
+  overflow: visible;
+}
+
+.chart-grid {
+  stroke: rgba(31, 29, 26, 0.12);
+  stroke-width: 1;
+}
+
+.chart-footer {
+  display: flex;
+  justify-content: space-between;
+  color: var(--muted);
+  font-size: 0.84rem;
+}
+
+.chart-empty {
+  padding: 36px 18px;
+  border-radius: 18px;
+  background: #fbf6ef;
+  border: 1px dashed var(--line-strong);
+  color: var(--muted);
+  text-align: center;
 }
 
 .code-block {
@@ -333,4 +436,3 @@ input {
     display: grid;
   }
 }
-

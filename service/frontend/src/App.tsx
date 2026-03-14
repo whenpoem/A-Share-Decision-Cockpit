@@ -3,32 +3,12 @@ import { useEffect, useMemo, useState } from "react";
 type Mode = "backtest" | "paper" | "live";
 type Tab = "control" | "backtest" | "paper" | "live" | "signals" | "memory" | "diagnostics";
 
+type ChartPoint = {
+  label: string;
+  value: number;
+};
+
 const API = "http://127.0.0.1:8000";
-
-async function getJson<T>(path: string, init?: RequestInit): Promise<T> {
-  const response = await fetch(`${API}${path}`, {
-    headers: { "Content-Type": "application/json" },
-    ...init,
-  });
-  if (!response.ok) {
-    throw new Error(`HTTP ${response.status}`);
-  }
-  return response.json();
-}
-
-function fmtPct(value: number | undefined): string {
-  if (value === undefined || Number.isNaN(value)) {
-    return "--";
-  }
-  return `${(value * 100).toFixed(2)}%`;
-}
-
-function fmtNum(value: number | undefined): string {
-  if (value === undefined || Number.isNaN(value)) {
-    return "--";
-  }
-  return value.toLocaleString("zh-CN", { maximumFractionDigits: 2 });
-}
 
 const MODE_LABELS: Record<Mode, string> = {
   backtest: "回测",
@@ -82,8 +62,8 @@ const RUN_STATUS_LABELS: Record<string, string> = {
 };
 
 const STANCE_LABELS: Record<string, string> = {
-  bullish: "看多",
-  bearish: "看空",
+  bullish: "偏多",
+  bearish: "偏空",
   neutral: "中性",
 };
 
@@ -103,13 +83,6 @@ const ACTION_LABELS: Record<string, string> = {
   avoid: "回避",
 };
 
-const STAGE_LABELS: Record<string, string> = {
-  research: "研究",
-  decision: "决策",
-  risk: "风控",
-  execution: "执行",
-};
-
 const METRIC_LABELS: Record<string, string> = {
   total_return: "累计收益",
   annual_return: "年化收益",
@@ -124,11 +97,165 @@ const METRIC_LABELS: Record<string, string> = {
   excess_return: "超额收益",
 };
 
+async function getJson<T>(path: string, init?: RequestInit): Promise<T> {
+  const response = await fetch(`${API}${path}`, {
+    headers: { "Content-Type": "application/json" },
+    ...init,
+  });
+  if (!response.ok) {
+    throw new Error(`HTTP ${response.status}`);
+  }
+  return response.json();
+}
+
 function labelOf(table: Record<string, string>, value: string | undefined, fallback = "--"): string {
   if (!value) {
     return fallback;
   }
   return table[value] ?? value;
+}
+
+function fmtPct(value: number | undefined): string {
+  if (value === undefined || Number.isNaN(value)) {
+    return "--";
+  }
+  return `${(value * 100).toFixed(2)}%`;
+}
+
+function fmtNum(value: number | undefined): string {
+  if (value === undefined || Number.isNaN(value)) {
+    return "--";
+  }
+  return value.toLocaleString("zh-CN", { maximumFractionDigits: 2 });
+}
+
+function fmtDate(value: string | undefined): string {
+  if (!value) {
+    return "--";
+  }
+  return value.slice(0, 10);
+}
+
+function cumulativeReturn(points: ChartPoint[]): number | undefined {
+  if (points.length < 2 || points[0].value === 0) {
+    return undefined;
+  }
+  return points[points.length - 1].value / points[0].value - 1;
+}
+
+function toBacktestNavPoints(summary: any): ChartPoint[] {
+  return (summary?.equity_curve ?? []).map((item: any) => ({
+    label: item.as_of_date,
+    value: Number(item.nav ?? 0),
+  }));
+}
+
+function toDrawdownPoints(summary: any): ChartPoint[] {
+  return (summary?.drawdown_curve ?? []).map((item: any) => ({
+    label: item.as_of_date,
+    value: Number(item.drawdown ?? 0),
+  }));
+}
+
+function toPortfolioNavPoints(memory: any): ChartPoint[] {
+  return (memory?.portfolio_history ?? [])
+    .map((item: any) => ({
+      label: item.as_of_date,
+      value: Number(item.payload?.current_nav ?? 0),
+    }))
+    .filter((item: ChartPoint) => item.value > 0);
+}
+
+function LineChart({
+  title,
+  points,
+  percent = false,
+  tone = "accent",
+}: {
+  title: string;
+  points: ChartPoint[];
+  percent?: boolean;
+  tone?: "accent" | "danger";
+}) {
+  if (points.length === 0) {
+    return (
+      <div className="chart-card">
+        <div className="chart-header">
+          <h4>{title}</h4>
+        </div>
+        <div className="chart-empty">暂无可视化数据</div>
+      </div>
+    );
+  }
+
+  const width = 760;
+  const height = 220;
+  const padding = 24;
+  const values = points.map((item) => item.value);
+  const min = Math.min(...values);
+  const max = Math.max(...values);
+  const span = max - min || Math.max(Math.abs(max), 1);
+  const path = points
+    .map((item, index) => {
+      const x = padding + (index / Math.max(points.length - 1, 1)) * (width - padding * 2);
+      const y = height - padding - ((item.value - min) / span) * (height - padding * 2);
+      return `${index === 0 ? "M" : "L"} ${x.toFixed(1)} ${y.toFixed(1)}`;
+    })
+    .join(" ");
+
+  const stroke = tone === "danger" ? "var(--red)" : "var(--accent)";
+  const latest = points[points.length - 1];
+  const first = points[0];
+
+  return (
+    <div className="chart-card">
+      <div className="chart-header">
+        <div>
+          <h4>{title}</h4>
+          <p>
+            起点 {fmtDate(first.label)} · 终点 {fmtDate(latest.label)}
+          </p>
+        </div>
+        <strong>{percent ? fmtPct(latest.value) : fmtNum(latest.value)}</strong>
+      </div>
+      <svg className="chart" viewBox={`0 0 ${width} ${height}`} role="img" aria-label={title}>
+        <path className="chart-grid" d={`M ${padding} ${padding} H ${width - padding}`} />
+        <path
+          className="chart-grid"
+          d={`M ${padding} ${height / 2} H ${width - padding}`}
+        />
+        <path
+          className="chart-grid"
+          d={`M ${padding} ${height - padding} H ${width - padding}`}
+        />
+        <path d={path} fill="none" stroke={stroke} strokeWidth="3.5" strokeLinecap="round" />
+      </svg>
+      <div className="chart-footer">
+        <span>{percent ? fmtPct(min) : fmtNum(min)}</span>
+        <span>{percent ? fmtPct(max) : fmtNum(max)}</span>
+      </div>
+    </div>
+  );
+}
+
+function MetricCard({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="metric-card">
+      <span>{label}</span>
+      <strong>{value}</strong>
+    </div>
+  );
+}
+
+function JsonPanel({ title, payload }: { title: string; payload: any }) {
+  return (
+    <section className="panel">
+      <div className="panel-head">
+        <h3>{title}</h3>
+      </div>
+      <pre className="code-block">{payload ? JSON.stringify(payload, null, 2) : "暂无数据"}</pre>
+    </section>
+  );
 }
 
 function App() {
@@ -141,7 +268,7 @@ function App() {
   const [memory, setMemory] = useState<any>(null);
   const [diagnostics, setDiagnostics] = useState<any>(null);
   const [backtestRuns, setBacktestRuns] = useState<any[]>([]);
-  const [selectedBacktest, setSelectedBacktest] = useState<any>(null);
+  const [selectedBacktestRunId, setSelectedBacktestRunId] = useState<string>("");
   const [paperQueue, setPaperQueue] = useState<any[]>([]);
   const [liveQueue, setLiveQueue] = useState<any[]>([]);
   const [error, setError] = useState<string | null>(null);
@@ -155,6 +282,10 @@ function App() {
 
   const taskList = system?.tasks ?? [];
   const latestTask = taskList[0];
+  const selectedBacktest = useMemo(
+    () => backtestRuns.find((item) => item.run_id === selectedBacktestRunId)?.summary ?? null,
+    [backtestRuns, selectedBacktestRunId],
+  );
 
   const refresh = async (currentMode: Mode = mode) => {
     try {
@@ -187,14 +318,14 @@ function App() {
       setMemory(memoryPayload);
       setDiagnostics(diagnosticsPayload);
       setBacktestRuns(backtestPayload.runs ?? []);
+      if (!selectedBacktestRunId && (backtestPayload.runs?.length ?? 0) > 0) {
+        setSelectedBacktestRunId(backtestPayload.runs[0].run_id);
+      }
       if (currentMode === "paper") {
         setPaperQueue(queuePayload.tickets ?? []);
       }
       if (currentMode === "live") {
         setLiveQueue(queuePayload.tickets ?? []);
-      }
-      if (!selectedBacktest && (backtestPayload.runs?.length ?? 0) > 0) {
-        setSelectedBacktest(backtestPayload.runs[0].summary);
       }
     } catch (err) {
       setError(err instanceof Error ? err.message : "加载控制台失败");
@@ -206,7 +337,7 @@ function App() {
   }, [mode]);
 
   useEffect(() => {
-    const timer = window.setInterval(() => refresh(mode), 4000);
+    const timer = window.setInterval(() => refresh(mode), 5000);
     return () => window.clearInterval(timer);
   }, [mode]);
 
@@ -229,7 +360,7 @@ function App() {
       await getJson(path, init);
       await refresh(mode);
     } catch (err) {
-      setError(err instanceof Error ? `${label}失败：${err.message}` : `${label}失败`);
+      setError(err instanceof Error ? `${label}失败: ${err.message}` : `${label}失败`);
     } finally {
       setLoading(false);
     }
@@ -269,13 +400,437 @@ function App() {
     [mode],
   );
 
+  const currentNavSeries = useMemo(() => toPortfolioNavPoints(memory), [memory]);
+  const backtestNavSeries = useMemo(() => toBacktestNavPoints(selectedBacktest), [selectedBacktest]);
+  const backtestDrawdownSeries = useMemo(
+    () => toDrawdownPoints(selectedBacktest),
+    [selectedBacktest],
+  );
+
+  const renderControl = () => (
+    <div className="grid two">
+      <section className="panel">
+        <div className="panel-head">
+          <h3>运行控制</h3>
+        </div>
+        <div className="action-grid">
+          <button
+            onClick={() =>
+              submitAction("运行模拟盘周期", "/api/control/run-paper-cycle", {
+                method: "POST",
+                body: JSON.stringify({}),
+              })
+            }
+            disabled={loading}
+          >
+            运行模拟盘周期
+          </button>
+          <button
+            onClick={() =>
+              submitAction("运行真实盘周期", "/api/control/run-live-cycle", {
+                method: "POST",
+                body: JSON.stringify({}),
+              })
+            }
+            disabled={loading}
+          >
+            运行真实盘周期
+          </button>
+          <button
+            onClick={() =>
+              submitAction("启动真实盘会话", "/api/control/start-live-session", {
+                method: "POST",
+              })
+            }
+            disabled={loading}
+          >
+            启动真实盘会话
+          </button>
+          <button
+            onClick={() =>
+              submitAction("停止真实盘会话", "/api/control/stop-live-session", {
+                method: "POST",
+              })
+            }
+            disabled={loading}
+          >
+            停止真实盘会话
+          </button>
+          <button
+            onClick={() =>
+              submitAction("重建记忆", "/api/control/rebuild-memory", {
+                method: "POST",
+                body: JSON.stringify({ mode }),
+              })
+            }
+            disabled={loading}
+          >
+            重建记忆
+          </button>
+          <button onClick={() => refresh(mode)} disabled={loading}>
+            刷新状态
+          </button>
+        </div>
+      </section>
+
+      <section className="panel">
+        <div className="panel-head">
+          <h3>任务列表</h3>
+        </div>
+        <div className="list">
+          {taskList.length === 0 ? <p className="muted">暂无任务记录。</p> : null}
+          {taskList.map((task: any) => (
+            <div key={task.task_id} className="list-row">
+              <div>
+                <strong>{labelOf(TASK_TYPE_LABELS, task.task_type)}</strong>
+                <p>{labelOf(MODE_LABELS, task.mode as Mode, "系统")}</p>
+              </div>
+              <div className="list-meta">
+                <strong>{labelOf(TASK_STATUS_LABELS, task.status)}</strong>
+                <span>{fmtPct(task.progress)}</span>
+              </div>
+            </div>
+          ))}
+        </div>
+      </section>
+
+      <section className="panel span-two">
+        <LineChart
+          title={`${MODE_LABELS[mode]}净值曲线`}
+          points={currentNavSeries}
+        />
+      </section>
+    </div>
+  );
+
+  const renderBacktest = () => (
+    <div className="grid two">
+      <section className="panel">
+        <div className="panel-head">
+          <h3>运行回测</h3>
+        </div>
+        <div className="form-grid">
+          <label>
+            开始日期
+            <input
+              value={backtestForm.start_date}
+              onChange={(event) =>
+                setBacktestForm((prev) => ({ ...prev, start_date: event.target.value }))
+              }
+            />
+          </label>
+          <label>
+            结束日期
+            <input
+              value={backtestForm.end_date}
+              onChange={(event) =>
+                setBacktestForm((prev) => ({ ...prev, end_date: event.target.value }))
+              }
+            />
+          </label>
+          <label>
+            初始资金
+            <input
+              value={backtestForm.initial_capital}
+              onChange={(event) =>
+                setBacktestForm((prev) => ({ ...prev, initial_capital: event.target.value }))
+              }
+            />
+          </label>
+          <label className="full">
+            股票池
+            <input
+              value={backtestForm.watchlist}
+              placeholder="例如: 000001,600519,300750"
+              onChange={(event) =>
+                setBacktestForm((prev) => ({ ...prev, watchlist: event.target.value }))
+              }
+            />
+          </label>
+        </div>
+        <button onClick={submitBacktest} disabled={loading}>
+          启动回测
+        </button>
+      </section>
+
+      <section className="panel">
+        <div className="panel-head">
+          <h3>回测记录</h3>
+        </div>
+        <div className="list">
+          {backtestRuns.length === 0 ? <p className="muted">暂无回测记录。</p> : null}
+          {backtestRuns.map((item) => (
+            <button
+              key={item.run_id}
+              className={item.run_id === selectedBacktestRunId ? "list-row selectable active" : "list-row selectable"}
+              onClick={() => setSelectedBacktestRunId(item.run_id)}
+            >
+              <div>
+                <strong>{item.run_id}</strong>
+                <p>
+                  {item.start_date} 到 {item.end_date}
+                </p>
+              </div>
+              <div className="list-meta">
+                <strong>{labelOf(TASK_STATUS_LABELS, item.status, item.status)}</strong>
+                <span>{fmtPct(item.summary?.metrics?.total_return)}</span>
+              </div>
+            </button>
+          ))}
+        </div>
+      </section>
+
+      <section className="panel span-two">
+        <div className="metric-grid">
+          {Object.entries(selectedBacktest?.metrics ?? {}).map(([key, value]) => (
+            <MetricCard
+              key={key}
+              label={METRIC_LABELS[key] ?? key}
+              value={key.includes("drawdown") || key.includes("return") || key.includes("rate") || key.includes("turnover") || key.includes("fee")
+                ? fmtPct(Number(value))
+                : fmtNum(Number(value))}
+            />
+          ))}
+        </div>
+      </section>
+
+      <section className="panel span-two">
+        <LineChart title="回测净值曲线" points={backtestNavSeries} />
+      </section>
+
+      <section className="panel span-two">
+        <LineChart title="回测回撤曲线" points={backtestDrawdownSeries} percent tone="danger" />
+      </section>
+    </div>
+  );
+
+  const renderQueue = (tickets: any[], queueMode: "paper" | "live") => (
+    <section className="panel">
+      <div className="panel-head">
+        <h3>{queueMode === "live" ? "真实盘审批队列" : "模拟盘审批队列"}</h3>
+      </div>
+      <div className="list">
+        {tickets.length === 0 ? <p className="muted">当前没有待审批订单。</p> : null}
+        {tickets.map((ticket) => (
+          <div key={ticket.ticket_id} className="approval-card">
+            <div>
+              <strong>
+                {ticket.symbol} · {labelOf(ACTION_LABELS, ticket.side, ticket.side)}
+              </strong>
+              <p>
+                目标仓位 {fmtPct(ticket.target_weight)} · 计划数量 {fmtNum(ticket.planned_quantity)}
+              </p>
+              <p>{ticket.reason || "暂无理由"}</p>
+              {ticket.risk_flags?.length ? (
+                <div className="chip-row">
+                  {ticket.risk_flags.map((flag: string) => (
+                    <span key={flag} className="chip">
+                      {flag}
+                    </span>
+                  ))}
+                </div>
+              ) : null}
+            </div>
+            <div className="approval-actions">
+              <button onClick={() => approvalActions.approve(ticket.ticket_id)} disabled={loading}>
+                批准
+              </button>
+              <button
+                className="secondary"
+                onClick={() => approvalActions.reject(ticket.ticket_id)}
+                disabled={loading}
+              >
+                拒绝
+              </button>
+            </div>
+          </div>
+        ))}
+      </div>
+    </section>
+  );
+
+  const renderPaper = () => (
+    <div className="grid two">
+      <section className="panel">
+        <div className="panel-head">
+          <h3>模拟盘表现</h3>
+        </div>
+        <div className="mini-grid">
+          <MetricCard label="净值收益" value={fmtPct(cumulativeReturn(currentNavSeries))} />
+          <MetricCard label="当前净值" value={fmtNum(dashboard?.portfolio?.nav)} />
+          <MetricCard label="当前仓位" value={fmtPct(dashboard?.portfolio?.gross_exposure)} />
+        </div>
+      </section>
+      {renderQueue(paperQueue, "paper")}
+      <section className="panel span-two">
+        <LineChart title="模拟盘净值曲线" points={currentNavSeries} />
+      </section>
+    </div>
+  );
+
+  const renderLive = () => (
+    <div className="grid two">
+      <section className="panel">
+        <div className="panel-head">
+          <h3>真实盘状态</h3>
+        </div>
+        <div className="mini-grid">
+          <MetricCard label="账户净值" value={fmtNum(system?.live_account?.equity)} />
+          <MetricCard label="可用现金" value={fmtNum(system?.live_account?.cash)} />
+          <MetricCard label="券商连接" value={system?.live_account?.connected ? "已连接" : "未连接"} />
+        </div>
+        <p className="muted">
+          {system?.live_account?.message || "当前以 live-ready 模式展示，真实下单仍受券商连接与审批流控制。"}
+        </p>
+      </section>
+      {renderQueue(liveQueue, "live")}
+      <section className="panel span-two">
+        <LineChart title="真实盘净值曲线" points={currentNavSeries} />
+      </section>
+    </div>
+  );
+
+  const renderSignals = () => (
+    <div className="grid two">
+      <section className="panel">
+        <div className="panel-head">
+          <h3>研究卡</h3>
+        </div>
+        <div className="list">
+          {(signals?.cards ?? []).length === 0 ? <p className="muted">暂无研究卡。</p> : null}
+          {(signals?.cards ?? []).map((card: any) => (
+            <article key={card.symbol} className="signal-card">
+              <div className="signal-top">
+                <strong>{card.symbol}</strong>
+                <span className={`tag ${card.stance}`}>{labelOf(STANCE_LABELS, card.stance)}</span>
+                <span className="tag muted-tag">{labelOf(EVENT_QUALITY_LABELS, card.event_quality)}</span>
+                <span className="tag muted-tag">{card.provider_name}</span>
+              </div>
+              <p>{card.summary}</p>
+              {card.drivers?.length ? (
+                <div className="chip-row">
+                  {card.drivers.map((item: string) => (
+                    <span key={item} className="chip">
+                      {item}
+                    </span>
+                  ))}
+                </div>
+              ) : null}
+              {card.risks?.length ? (
+                <div className="note-list">
+                  {card.risks.map((risk: string) => (
+                    <p key={risk} className="muted">
+                      风险: {risk}
+                    </p>
+                  ))}
+                </div>
+              ) : null}
+            </article>
+          ))}
+        </div>
+      </section>
+      <div className="section-stack">
+        <JsonPanel title="组合决策" payload={signals?.decision} />
+        <JsonPanel title="风控结果" payload={signals?.risk} />
+      </div>
+    </div>
+  );
+
+  const renderMemory = () => (
+    <div className="grid two">
+      <section className="panel">
+        <div className="panel-head">
+          <h3>持仓记忆</h3>
+        </div>
+        <div className="list">
+          {(memory?.positions ?? []).length === 0 ? <p className="muted">暂无持仓记忆。</p> : null}
+          {(memory?.positions ?? []).map((item: any) => (
+            <div key={item.symbol} className="list-row">
+              <div>
+                <strong>{item.symbol}</strong>
+                <p>{item.current_thesis || item.initial_thesis || "暂无 thesis"}</p>
+              </div>
+              <div className="list-meta">
+                <strong>{item.is_open ? "持仓中" : "已平仓"}</strong>
+                <span>{item.holding_days ?? 0} 天</span>
+              </div>
+            </div>
+          ))}
+        </div>
+      </section>
+
+      <section className="panel">
+        <div className="panel-head">
+          <h3>组合记忆</h3>
+        </div>
+        <div className="kv-grid">
+          <div>
+            <span>市场状态</span>
+            <strong>{memory?.portfolio?.market_regime ?? "--"}</strong>
+          </div>
+          <div>
+            <span>当前净值</span>
+            <strong>{fmtNum(memory?.portfolio?.current_nav)}</strong>
+          </div>
+          <div>
+            <span>历史峰值</span>
+            <strong>{fmtNum(memory?.portfolio?.peak_nav)}</strong>
+          </div>
+          <div>
+            <span>连续失败数</span>
+            <strong>{fmtNum(memory?.portfolio?.consecutive_failures)}</strong>
+          </div>
+        </div>
+        {memory?.portfolio?.risk_flags?.length ? (
+          <div className="chip-row">
+            {memory.portfolio.risk_flags.map((flag: string) => (
+              <span key={flag} className="chip">
+                {flag}
+              </span>
+            ))}
+          </div>
+        ) : null}
+      </section>
+
+      <section className="panel span-two">
+        <LineChart title={`${MODE_LABELS[mode]}记忆净值曲线`} points={currentNavSeries} />
+      </section>
+
+      <section className="panel span-two">
+        <div className="panel-head">
+          <h3>决策日志</h3>
+        </div>
+        <div className="timeline">
+          {(memory?.journal ?? []).length === 0 ? <p className="muted">暂无决策日志。</p> : null}
+          {(memory?.journal ?? []).map((item: any) => (
+            <div key={item.id} className="timeline-row">
+              <strong>{item.symbol}</strong>
+              <span>{item.stage}</span>
+              <span>{fmtDate(item.as_of_date)}</span>
+            </div>
+          ))}
+        </div>
+      </section>
+    </div>
+  );
+
+  const renderDiagnostics = () => (
+    <div className="grid two">
+      <JsonPanel title="系统诊断" payload={diagnostics?.system} />
+      <JsonPanel title="当前模式状态" payload={modeStatus} />
+      <JsonPanel title="模拟盘诊断" payload={diagnostics?.paper} />
+      <JsonPanel title="真实盘诊断" payload={diagnostics?.live} />
+      <JsonPanel title="回测诊断" payload={diagnostics?.backtest} />
+    </div>
+  );
+
   return (
     <div className="cockpit-shell">
       <header className="topbar">
         <div>
-          <p className="eyebrow">A股 AI 工作台</p>
+          <p className="eyebrow">A-SHARE AI WORKSTATION</p>
           <h1>A 股本地决策工作台</h1>
-          <p className="lede">一个本地控制台里完成回测、模拟盘、审批、记忆和执行状态查看。</p>
+          <p className="lede">降低文本噪音、强化技术先验、统一管理回测、模拟盘、真实盘和收益可视化。</p>
         </div>
         <div className="mode-switch">
           {(["backtest", "paper", "live"] as Mode[]).map((item) => (
@@ -326,8 +881,8 @@ function App() {
               <h2>{dashboard?.run?.run_id ?? "尚无运行记录"}</h2>
               <p>
                 {dashboard?.run
-                  ? `观察日 ${dashboard.run.as_of_date} · 状态 ${labelOf(RUN_STATUS_LABELS, dashboard.run.status)}`
-                  : "先运行一次回测或模拟盘周期，再查看信号、审批和记忆。"}
+                  ? `观察日 ${fmtDate(dashboard.run.as_of_date)} · 状态 ${labelOf(RUN_STATUS_LABELS, dashboard.run.status)}`
+                  : "先运行一次回测或模拟盘周期，再查看信号、审批、记忆和收益曲线。"}
               </p>
             </div>
             <div className="hero-stats">
@@ -348,392 +903,15 @@ function App() {
 
           {error ? <div className="banner error">{error}</div> : null}
 
-          {tab === "control" ? (
-            <div className="grid two">
-              <section className="panel">
-                <div className="panel-head">
-                  <h3>运行控制</h3>
-                </div>
-                <div className="action-grid">
-                  <button
-                    onClick={() =>
-                      submitAction("运行模拟盘", "/api/control/run-paper-cycle", {
-                        method: "POST",
-                        body: JSON.stringify({}),
-                      })
-                    }
-                    disabled={loading}
-                  >
-                    运行模拟盘周期
-                  </button>
-                  <button
-                    onClick={() =>
-                      submitAction("运行真实盘", "/api/control/run-live-cycle", {
-                        method: "POST",
-                        body: JSON.stringify({}),
-                      })
-                    }
-                    disabled={loading}
-                  >
-                    运行真实盘周期
-                  </button>
-                  <button
-                    onClick={() =>
-                      submitAction("启动真实盘", "/api/control/start-live-session", {
-                        method: "POST",
-                      })
-                    }
-                    disabled={loading}
-                  >
-                    启动真实盘会话
-                  </button>
-                  <button
-                    onClick={() =>
-                      submitAction("停止真实盘", "/api/control/stop-live-session", {
-                        method: "POST",
-                      })
-                    }
-                    disabled={loading}
-                  >
-                    停止真实盘会话
-                  </button>
-                  <button
-                    onClick={() =>
-                      submitAction("重建记忆", "/api/control/rebuild-memory", {
-                        method: "POST",
-                        body: JSON.stringify({ mode }),
-                      })
-                    }
-                    disabled={loading}
-                  >
-                    重建记忆
-                  </button>
-                  <button onClick={() => refresh(mode)} disabled={loading}>
-                    刷新状态
-                  </button>
-                </div>
-              </section>
-
-              <section className="panel">
-                <div className="panel-head">
-                  <h3>任务列表</h3>
-                </div>
-                <div className="list">
-                  {taskList.map((task: any) => (
-                    <div key={task.task_id} className="list-row">
-                      <div>
-                        <strong>{labelOf(TASK_TYPE_LABELS, task.task_type)}</strong>
-                        <p>{labelOf(MODE_LABELS, task.mode, "系统")}</p>
-                        {task.error ? <p>{task.error}</p> : null}
-                      </div>
-                      <div>
-                        <span>{labelOf(TASK_STATUS_LABELS, task.status)}</span>
-                        <p>{fmtPct(task.progress)}</p>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              </section>
-            </div>
-          ) : null}
-
-          {tab === "backtest" ? (
-            <div className="grid two">
-              <section className="panel">
-                <div className="panel-head">
-                  <h3>回测设置</h3>
-                </div>
-                <div className="form-grid">
-                  <label>
-                    开始日期
-                    <input
-                      type="date"
-                      value={backtestForm.start_date}
-                      onChange={(event) =>
-                        setBacktestForm({ ...backtestForm, start_date: event.target.value })
-                      }
-                    />
-                  </label>
-                  <label>
-                    结束日期
-                    <input
-                      type="date"
-                      value={backtestForm.end_date}
-                      onChange={(event) =>
-                        setBacktestForm({ ...backtestForm, end_date: event.target.value })
-                      }
-                    />
-                  </label>
-                  <label>
-                    初始资金
-                    <input
-                      value={backtestForm.initial_capital}
-                      onChange={(event) =>
-                        setBacktestForm({
-                          ...backtestForm,
-                          initial_capital: event.target.value,
-                        })
-                      }
-                    />
-                  </label>
-                  <label className="full">
-                    股票池
-                    <input
-                      value={backtestForm.watchlist}
-                      onChange={(event) =>
-                        setBacktestForm({ ...backtestForm, watchlist: event.target.value })
-                      }
-                      placeholder="000001,600519,300750"
-                    />
-                  </label>
-                </div>
-                <button onClick={submitBacktest} disabled={loading}>
-                  运行日频滚动回测
-                </button>
-              </section>
-
-              <section className="panel">
-                <div className="panel-head">
-                  <h3>回测记录</h3>
-                </div>
-                <div className="list">
-                  {backtestRuns.map((run: any) => (
-                    <button
-                      key={run.run_id}
-                      className="list-row selectable"
-                      onClick={() => setSelectedBacktest(run.summary)}
-                    >
-                      <div>
-                        <strong>{run.run_id}</strong>
-                        <p>
-                          {run.start_date} 到 {run.end_date}
-                        </p>
-                      </div>
-                      <div>
-                        <span>{labelOf(TASK_STATUS_LABELS, run.status, run.status ?? "--")}</span>
-                        <p>{fmtPct(run.summary?.metrics?.total_return)}</p>
-                      </div>
-                    </button>
-                  ))}
-                </div>
-              </section>
-
-              <section className="panel span-two">
-                <div className="panel-head">
-                  <h3>回测结果</h3>
-                </div>
-                {selectedBacktest ? (
-                  <>
-                    <div className="metric-grid">
-                      {Object.entries(selectedBacktest.metrics ?? {}).map(([key, value]) => (
-                        <div key={key} className="metric-card">
-                          <span>{METRIC_LABELS[key] ?? key}</span>
-                          <strong>
-                            {typeof value === "number" &&
-                            key !== "profit_factor" &&
-                            key !== "avg_holding_days"
-                              ? fmtPct(value)
-                              : String(value)}
-                          </strong>
-                        </div>
-                      ))}
-                    </div>
-                    <div className="timeline">
-                      {(selectedBacktest.equity_curve ?? []).slice(-20).map((point: any) => (
-                        <div key={point.as_of_date} className="timeline-row">
-                          <span>{point.as_of_date}</span>
-                          <strong>{fmtNum(point.nav)}</strong>
-                        </div>
-                      ))}
-                    </div>
-                  </>
-                ) : (
-                  <p className="muted">还没有选中的回测结果。</p>
-                )}
-              </section>
-            </div>
-          ) : null}
-
-          {tab === "paper" ? (
-            <section className="panel">
-              <div className="panel-head">
-                <h3>模拟盘审批队列</h3>
-              </div>
-              <ApprovalQueue
-                tickets={paperQueue}
-                onApprove={approvalActions.approve}
-                onReject={approvalActions.reject}
-              />
-            </section>
-          ) : null}
-
-          {tab === "live" ? (
-            <div className="grid two">
-              <section className="panel">
-                <div className="panel-head">
-                  <h3>券商账户</h3>
-                </div>
-                <div className="metric-grid">
-                  <div className="metric-card">
-                    <span>券商适配器</span>
-                    <strong>{system?.live_account?.provider ?? "--"}</strong>
-                  </div>
-                  <div className="metric-card">
-                    <span>连接状态</span>
-                    <strong>{system?.live_account?.connected ? "已连接" : "未连接"}</strong>
-                  </div>
-                  <div className="metric-card">
-                    <span>现金</span>
-                    <strong>{fmtNum(system?.live_account?.cash)}</strong>
-                  </div>
-                  <div className="metric-card">
-                    <span>权益</span>
-                    <strong>{fmtNum(system?.live_account?.equity)}</strong>
-                  </div>
-                </div>
-              </section>
-              <section className="panel">
-                <div className="panel-head">
-                  <h3>真实盘审批队列</h3>
-                </div>
-                <ApprovalQueue
-                  tickets={liveQueue}
-                  onApprove={approvalActions.approve}
-                  onReject={approvalActions.reject}
-                />
-              </section>
-            </div>
-          ) : null}
-
-          {tab === "signals" ? (
-            <div className="grid two">
-              <section className="panel">
-                <div className="panel-head">
-                  <h3>研究卡</h3>
-                </div>
-                <div className="list">
-                  {(signals?.cards ?? []).map((card: any) => (
-                    <div key={card.symbol} className="signal-card">
-                      <div className="signal-top">
-                        <strong>{card.symbol}</strong>
-                        <span className={`tag ${card.stance}`}>{labelOf(STANCE_LABELS, card.stance)}</span>
-                        <span className="tag muted-tag">
-                          {labelOf(EVENT_QUALITY_LABELS, card.event_quality)}
-                        </span>
-                      </div>
-                      <p>{card.summary}</p>
-                      <div className="chip-row">
-                        {(card.drivers ?? []).slice(0, 4).map((item: string) => (
-                          <span key={item} className="chip">
-                            {item}
-                          </span>
-                        ))}
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              </section>
-              <section className="panel">
-                <div className="panel-head">
-                  <h3>决策与风控</h3>
-                </div>
-                <pre className="code-block">{JSON.stringify(signals?.decision ?? {}, null, 2)}</pre>
-                <pre className="code-block">{JSON.stringify(signals?.risk ?? {}, null, 2)}</pre>
-              </section>
-            </div>
-          ) : null}
-
-          {tab === "memory" ? (
-            <div className="grid two">
-              <section className="panel">
-                <div className="panel-head">
-                  <h3>持仓记忆</h3>
-                </div>
-                <div className="list">
-                  {(memory?.positions ?? []).map((item: any) => (
-                    <div key={item.symbol} className="list-row">
-                      <div>
-                        <strong>{item.symbol}</strong>
-                        <p>{item.current_thesis || item.last_research_summary || "还没有投资逻辑摘要"}</p>
-                      </div>
-                      <div>
-                        <span>{labelOf(ACTION_LABELS, item.last_decision_action, "持有")}</span>
-                        <p>{item.holding_days ?? 0} 天</p>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              </section>
-              <section className="panel">
-                <div className="panel-head">
-                  <h3>决策日志</h3>
-                </div>
-                <div className="timeline">
-                  {(memory?.journal ?? []).slice(0, 30).map((entry: any) => (
-                    <div key={entry.id} className="timeline-row">
-                      <span>{entry.as_of_date}</span>
-                      <strong>{entry.symbol}</strong>
-                      <span>{labelOf(STAGE_LABELS, entry.stage)}</span>
-                    </div>
-                  ))}
-                </div>
-              </section>
-            </div>
-          ) : null}
-
-          {tab === "diagnostics" ? (
-            <div className="grid two">
-              <section className="panel">
-                <div className="panel-head">
-                  <h3>模式状态</h3>
-                </div>
-                <pre className="code-block">{JSON.stringify(system?.modes ?? [], null, 2)}</pre>
-              </section>
-              <section className="panel">
-                <div className="panel-head">
-                  <h3>诊断信息</h3>
-                </div>
-                <pre className="code-block">{JSON.stringify(diagnostics ?? {}, null, 2)}</pre>
-              </section>
-            </div>
-          ) : null}
+          {tab === "control" ? renderControl() : null}
+          {tab === "backtest" ? renderBacktest() : null}
+          {tab === "paper" ? renderPaper() : null}
+          {tab === "live" ? renderLive() : null}
+          {tab === "signals" ? renderSignals() : null}
+          {tab === "memory" ? renderMemory() : null}
+          {tab === "diagnostics" ? renderDiagnostics() : null}
         </main>
       </div>
-    </div>
-  );
-}
-
-function ApprovalQueue({
-  tickets,
-  onApprove,
-  onReject,
-}: {
-  tickets: any[];
-  onApprove: (ticketId: string) => Promise<void>;
-  onReject: (ticketId: string) => Promise<void>;
-}) {
-  if (!tickets.length) {
-    return <p className="muted">当前没有待审批订单。</p>;
-  }
-  return (
-    <div className="list">
-      {tickets.map((ticket) => (
-        <div key={ticket.ticket_id} className="approval-card">
-          <div>
-            <strong>{ticket.symbol}</strong>
-            <p>
-              {labelOf(ACTION_LABELS, ticket.side)} · 目标仓位 {fmtPct(ticket.target_weight)}
-            </p>
-            <p>{ticket.reason || "没有记录理由。"}</p>
-          </div>
-          <div className="approval-actions">
-            <button onClick={() => onApprove(ticket.ticket_id)}>批准</button>
-            <button className="secondary" onClick={() => onReject(ticket.ticket_id)}>
-              拒绝
-            </button>
-          </div>
-        </div>
-      ))}
     </div>
   );
 }

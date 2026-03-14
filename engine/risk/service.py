@@ -62,19 +62,19 @@ class RiskService:
                 status = "rejected"
                 approved_weight = 0.0
                 flags.append("blacklisted")
-            if intent.action == "buy" and intent.evidence_count < 2:
+            if intent.action == "buy" and intent.evidence_count < 1:
                 status = "rejected"
                 approved_weight = 0.0
                 flags.append("insufficient_evidence")
-            if intent.action == "buy" and prior.liquidity_score < 0.35:
+            if intent.action == "buy" and prior.liquidity_score < 0.28:
                 status = "rejected"
                 approved_weight = 0.0
                 flags.append("insufficient_liquidity")
-            if intent.action == "buy" and prior.prior_avoid_score >= 0.75:
+            if intent.action == "buy" and prior.prior_avoid_score >= 0.82:
                 approved_weight = min(approved_weight, self.settings.max_position_weight * 0.4)
                 status = "clipped" if approved_weight > 0 else "rejected"
                 flags.append("high_prior_avoid")
-            if intent.action == "buy" and prior.downside_risk_score >= 0.72:
+            if intent.action == "buy" and prior.downside_risk_score >= 0.78:
                 approved_weight = min(approved_weight, self.settings.max_position_weight * 0.5)
                 status = "clipped" if approved_weight > 0 else "rejected"
                 flags.append("high_downside_risk")
@@ -140,4 +140,3 @@ class RiskService:
         if position is None or nav <= 0:
             return 0.0
         return position.market_value / nav
-

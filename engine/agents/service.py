@@ -237,6 +237,8 @@ class ResearchAgent:
             "You are an A-share research analyst. "
             "Read price priors, text events, financials, position state, and memory context. "
             "Return only JSON that matches the ResearchCard schema. "
+            "Treat routine governance, dividend implementation, board meeting, and charter-change notices as low trading weight unless they are confirmed by price or financial acceleration. "
+            "Give more weight to price priors, breakout context, trend persistence, and clear business catalysts than to routine disclosure noise. "
             "If evidence is weak or conflicting, use stance=neutral and event_quality=weak or mixed. "
             "Output one JSON object only. Do not add markdown fences or prose outside JSON."
         )
@@ -318,7 +320,11 @@ class DecisionAgent:
             "Read research cards, existing positions, priors, and portfolio memory. "
             "Return only JSON that matches the TradeIntentSet schema. "
             "Every trade intent must include target_weight, stop_loss_pct, take_profit_pct, "
-            "time_stop_days, and evidence_count. Use higher cash when uncertainty is elevated. "
+            "time_stop_days, and evidence_count. Use higher cash when uncertainty is elevated, "
+            "but do not require perfect evidence before every entry. "
+            "If price priors are constructive, downside risk is controlled, and text is routine rather than negative, "
+            "you may open a small starter position in the 0.03 to 0.06 range. "
+            "Technical momentum and breakout confirmation should carry more weight than routine governance text. "
             "Even when there are no trades, you must still return all top-level keys: "
             "as_of_date, market_view, cash_target, trade_intents, rejected_symbols, "
             "portfolio_risks, decision_confidence, rationale, provider_name. "
@@ -336,6 +342,7 @@ class DecisionAgent:
                     "max_position_weight": self.settings.max_position_weight,
                     "max_gross_exposure": self.settings.max_gross_exposure,
                     "cash_bias_when_uncertain": True,
+                    "starter_position_range": [0.03, 0.06],
                 },
                 "output_rules": {
                     "single_json_object_only": True,
@@ -363,6 +370,10 @@ class DecisionAgent:
                         "rationale": "No high-conviction setup today.",
                         "provider_name": "deepseek",
                     },
+                    "bias_rules": [
+                        "Routine governance or dividend execution items should not block a starter long by themselves.",
+                        "If priors are constructive and text is neutral-to-slightly-positive, prefer a small starter long over automatic full cash.",
+                    ],
                 },
             }
         )

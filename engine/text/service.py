@@ -15,6 +15,55 @@ from engine.config import Settings
 from engine.storage.db import StateStore
 from engine.types import FinancialSnapshot, PositionState, PriorSignal, SymbolEventPack, TextEvent
 
+ROUTINE_EVENT_PATTERNS = (
+    "股东大会",
+    "董事会",
+    "监事会",
+    "章程",
+    "任职资格",
+    "权益分派",
+    "分红实施",
+    "回购进展",
+    "回购报告书",
+    "注册资本",
+    "闲置募集资金",
+    "治理",
+    "议案",
+    "审议通过",
+    "聘任",
+)
+
+POSITIVE_CATALYST_PATTERNS = (
+    "业绩预增",
+    "业绩快报",
+    "中标",
+    "重大合同",
+    "大额订单",
+    "回购注销",
+    "增持",
+    "提价",
+    "扩产",
+    "扭亏",
+    "超预期",
+    "新产品",
+    "投产",
+)
+
+NEGATIVE_CATALYST_PATTERNS = (
+    "减持",
+    "诉讼",
+    "处罚",
+    "亏损",
+    "下修",
+    "终止",
+    "违约",
+    "爆雷",
+    "监管",
+    "停产",
+    "商誉",
+    "问询",
+)
+
 
 class BaseTextProvider:
     provider_name = "base"
@@ -93,7 +142,7 @@ class AkshareTextProvider(BaseTextProvider):
                     title=title,
                     content=content,
                     url=url,
-                    importance_hint=0.62,
+                    importance_hint=_importance_from_text(title, content, base=0.56),
                     sentiment_hint=0.0,
                 )
             )
@@ -143,7 +192,7 @@ class AkshareTextProvider(BaseTextProvider):
                     title=title,
                     content=content,
                     url=detail.get("file_url") or detail_url,
-                    importance_hint=0.75,
+                    importance_hint=_importance_from_text(title, content, base=0.68),
                     sentiment_hint=0.0,
                 )
             )
@@ -363,9 +412,12 @@ class TextService:
             if prior.symbol not in candidate_symbols:
                 continue
             raw_events = self.store.list_events(
-                prior.symbol, as_of_date.isoformat(), self.settings.max_events_per_symbol
+                prior.symbol,
+                as_of_date.isoformat(),
+                max(self.settings.max_events_per_symbol * 4, 16),
             )
             events = [TextEvent.model_validate(payload) for payload in raw_events]
+            events = self._rank_events(events, as_of_date)
             packs.append(
                 SymbolEventPack(
                     as_of_date=as_of_date,
@@ -404,6 +456,35 @@ class TextService:
         }
         candidate_symbols |= set(positions.keys())
         return candidate_symbols
+
+    def _rank_events(self, events: list[TextEvent], as_of_date: datetime) -> list[TextEvent]:
+        if not events:
+            return []
+        ranked = sorted(
+            events,
+            key=lambda item: self._event_priority(item, as_of_date),
+            reverse=True,
+        )
+        filtered = [
+            item
+            for item in ranked
+            if self._event_priority(item, as_of_date) >= 0.22 or item.source_name in {"financial-summary", "risk-engine"}
+        ]
+        if not filtered:
+            filtered = ranked[: self.settings.max_events_per_symbol]
+        return filtered[: self.settings.max_events_per_symbol]
+
+    @staticmethod
+    def _event_priority(event: TextEvent, as_of_date: datetime) -> float:
+        age_days = max((as_of_date - event.published_at).total_seconds() / 86400.0, 0.0)
+        recency = max(0.0, 1.0 - min(age_days / 20.0, 1.0))
+        source_bonus = 0.06 if event.source_type == "filing" else 0.03 if event.source_type == "announcement" else 0.0
+        return (
+            0.62 * float(event.importance_hint)
+            + 0.23 * recency
+            + 0.10 * abs(float(event.sentiment_hint))
+            + source_bonus
+        )
 
     def _load_seed_events(self) -> list[TextEvent]:
         events: list[TextEvent] = []
@@ -549,6 +630,18 @@ def dedupe_events(events: list[TextEvent]) -> list[TextEvent]:
         seen.add(key)
         deduped.append(event)
     return deduped
+
+
+def _importance_from_text(title: str, content: str, *, base: float) -> float:
+    text = f"{title} {content}".lower()
+    score = base
+    if any(pattern.lower() in text for pattern in ROUTINE_EVENT_PATTERNS):
+        score -= 0.28
+    if any(pattern.lower() in text for pattern in POSITIVE_CATALYST_PATTERNS):
+        score += 0.24
+    if any(pattern.lower() in text for pattern in NEGATIVE_CATALYST_PATTERNS):
+        score += 0.18
+    return float(max(0.12, min(score, 0.95)))
 
 
 def _pick_column(frame: pd.DataFrame, *candidates: str) -> str:

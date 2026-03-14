@@ -400,24 +400,48 @@ def build_prior_signals(
         feature_frame[f"{column}_z"] = _zscore(feature_frame[column])
     priors = []
     for row in feature_frame.itertuples(index=False):
-        trend = _sigmoid(0.95 * row.ret_20_z + 0.55 * row.roe_z + 0.45 * row.net_profit_yoy_z)
-        reversal = _sigmoid((-0.75 * row.ret_5_z) + (-0.60 * row.drawdown_20_z) + 0.35 * row.amount_20_z)
-        breakout = _sigmoid(1.10 * row.breakout_ratio_z + 0.45 * row.ret_20_z)
-        downside = _sigmoid(0.80 * row.vol_20_z + 0.85 * (-row.drawdown_20_z) + 0.35 * row.debt_ratio_z)
-        liquidity = _sigmoid(1.15 * row.amount_20_z)
-        event_sensitivity = _sigmoid(0.7 * abs(row.ret_5_z) + 0.65 * row.vol_20_z)
+        trend = _sigmoid(
+            1.15 * row.ret_20_z
+            + 0.50 * row.ret_5_z
+            + 0.40 * row.roe_z
+            + 0.30 * row.net_profit_yoy_z
+        )
+        reversal = _sigmoid(
+            (-0.55 * row.ret_5_z)
+            + (-0.40 * row.drawdown_20_z)
+            + 0.25 * row.amount_20_z
+        )
+        breakout = _sigmoid(
+            1.35 * row.breakout_ratio_z
+            + 0.60 * row.ret_20_z
+            + 0.20 * row.amount_20_z
+        )
+        downside = _sigmoid(
+            0.70 * row.vol_20_z
+            + 0.60 * (-row.drawdown_20_z)
+            + 0.25 * row.debt_ratio_z
+        )
+        liquidity = _sigmoid(1.25 * row.amount_20_z + 0.15 * row.ret_20_z)
+        event_sensitivity = _sigmoid(0.45 * abs(row.ret_5_z) + 0.45 * row.vol_20_z)
         regime_alignment = _regime_alignment(regime, trend, reversal, downside)
         prior_long = np.clip(
-            0.30 * trend
-            + 0.20 * reversal
-            + 0.25 * breakout
-            + 0.15 * liquidity
-            + 0.10 * regime_alignment
-            - 0.20 * downside,
+            0.38 * trend
+            + 0.14 * reversal
+            + 0.30 * breakout
+            + 0.16 * liquidity
+            + 0.12 * regime_alignment
+            - 0.14 * downside,
             0.0,
             1.0,
         )
-        prior_avoid = np.clip(0.55 * downside + 0.20 * (1.0 - liquidity) + 0.25 * event_sensitivity, 0.0, 1.0)
+        prior_avoid = np.clip(
+            0.48 * downside
+            + 0.18 * (1.0 - liquidity)
+            + 0.16 * event_sensitivity
+            + 0.18 * (1.0 - breakout),
+            0.0,
+            1.0,
+        )
         priors.append(
             PriorSignal(
                 symbol=row.symbol,
@@ -442,9 +466,9 @@ def build_prior_signals(
 
 
 def classify_market_regime(avg_return: float, avg_vol: float) -> str:
-    if avg_return > 0.05 and avg_vol < 0.035:
+    if avg_return > 0.03 and avg_vol < 0.045:
         return "risk_on"
-    if avg_return < -0.03 or avg_vol > 0.055:
+    if avg_return < -0.04 or avg_vol > 0.065:
         return "risk_off"
     return "neutral"
 

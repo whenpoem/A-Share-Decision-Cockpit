@@ -159,6 +159,49 @@ def test_akshare_provider_extracts_and_caches_announcement_body(tmp_path) -> Non
     assert second_announcement.content == announcement.content
 
 
+def test_build_event_packs_deprioritizes_routine_text(tmp_path) -> None:
+    settings = _settings_for_tmpdir(tmp_path)
+    settings.max_events_per_symbol = 1
+    store = StateStore(settings.db_path)
+    service = TextService(settings, store, provider=RecordingProvider())
+    as_of_date = datetime(2026, 3, 14, 15, 0)
+    store.replace_text_events(
+        [
+            build_event(
+                "000001",
+                as_of_date - timedelta(hours=2),
+                "announcement",
+                "cninfo:disclosure",
+                "关于召开股东大会的公告",
+                "Routine governance item",
+                importance_hint=0.18,
+                sentiment_hint=0.0,
+            ).model_dump(mode="json"),
+            build_event(
+                "000001",
+                as_of_date - timedelta(hours=3),
+                "news",
+                "eastmoney:test",
+                "重大合同中标公告",
+                "Company won a major order with visible revenue impact",
+                importance_hint=0.88,
+                sentiment_hint=0.35,
+            ).model_dump(mode="json"),
+        ]
+    )
+
+    packs = service.build_event_packs(
+        as_of_date=as_of_date,
+        priors=[_prior("000001", "Alpha", long_score=0.80, avoid_score=0.20)],
+        financials={"000001": _financial("000001")},
+        positions={},
+    )
+
+    assert len(packs) == 1
+    assert len(packs[0].events) == 1
+    assert packs[0].events[0].title == "重大合同中标公告"
+
+
 class _FakeAkshare:
     def stock_news_em(self, symbol: str) -> pd.DataFrame:
         return pd.DataFrame(

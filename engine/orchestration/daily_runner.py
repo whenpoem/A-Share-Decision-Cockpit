@@ -1065,6 +1065,7 @@ class DailyRunner:
         return {
             "positions": runtime.store.list_position_memories(),
             "portfolio": runtime.store.latest_portfolio_memory(),
+            "portfolio_history": list(reversed(runtime.store.list_portfolio_memory(limit=180))),
             "journal": runtime.store.list_decision_journal(limit=100),
         }
 

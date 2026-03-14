@@ -8,7 +8,7 @@ from engine.risk.service import RiskService
 from engine.types import PriorSignal, TradeIntent, TradeIntentSet
 
 
-def test_risk_service_rejects_buy_without_enough_evidence() -> None:
+def test_risk_service_rejects_buy_without_any_evidence() -> None:
     settings = Settings.load(Path(__file__).resolve().parents[1])
     service = RiskService(settings)
     prior = PriorSignal(
@@ -44,7 +44,7 @@ def test_risk_service_rejects_buy_without_enough_evidence() -> None:
                 stop_loss_pct=0.08,
                 take_profit_pct=0.18,
                 time_stop_days=20,
-                evidence_count=1,
+                evidence_count=0,
             )
         ],
         decision_confidence=0.7,
@@ -63,4 +63,3 @@ def test_risk_service_rejects_buy_without_enough_evidence() -> None:
     assert not review.approved
     assert review.rejected[0].symbol == "000001"
     assert "insufficient_evidence" in review.rejected[0].risk_flags
-
